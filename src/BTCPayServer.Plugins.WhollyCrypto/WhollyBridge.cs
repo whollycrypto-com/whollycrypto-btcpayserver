@@ -28,9 +28,9 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
         await using var lease = await locks.Acquire(id, ct);
         var invoice = await invoices.GetInvoice(id) ?? throw new ConnectorException("Invoice not found.");
         var p = Details(invoice) ?? throw new ConnectorException("Wholly Crypto is not enabled for this invoice.");
-        var c = await connections.Get(invoice.StoreId, p.ConnectionId);
         try
         {
+            var c = await connections.Get(invoice.StoreId, p.ConnectionId);
             if (p.RequestJson is null)
             {
                 if (!start) return p;
@@ -41,7 +41,14 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
                     throw new ConnectorException("The merchant has disabled new Wholly payments.");
                 var baseUrl = new Uri(invoice.ServerUrl, UriKind.Absolute);
                 var returnUrl = new Uri(baseUrl, (c.EmbedCheckout ? "plugins/whollycrypto/return/" : "i/") + Uri.EscapeDataString(id)).AbsoluteUri;
-                p.RequestJson = new JObject
+                JArray? selection = null;
+                if (c.AcceptedMethods is not null)
+                {
+                    var catalog = PaymentSelection.Catalog(await client.Request(c,
+                        $"/v1/projects/{c.ProjectId}/stores/{c.StoreId}/payment-assets", null, null, ct));
+                    selection = PaymentSelection.Request(PaymentSelection.Select(c.AcceptedMethods.Select(x => x.Key), catalog));
+                }
+                var request = new JObject
                 {
                     ["amount"] = Protocol.Format(p.Amount), ["currency"] = p.Currency, ["order_id"] = "btcpay:" + id,
                     ["description"] = "Payment for BTCPay invoice " + id,
@@ -50,25 +57,36 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
                     ["redirect_url"] = returnUrl, ["cancel_url"] = returnUrl, ["redirect_automatically"] = !c.EmbedCheckout,
                     ["metadata"] = new JObject { ["btcpay_invoice_id"] = id, ["btcpay_store_id"] = invoice.StoreId,
                         ["order_id"] = invoice.Metadata.OrderId }
-                }.ToString(Formatting.None);
+                };
+                if (selection is not null) request["payment_methods"] = selection;
+                p.RequestJson = request.ToString(Formatting.None);
                 await Save(id, p); // The original bytes survive a timeout or restart.
             }
-            if (p.InvoiceId is null && invoice.ExpirationTime <= DateTimeOffset.UtcNow)
+            var lookupId = p.InvoiceId ?? p.CallbackInvoiceId;
+            if (lookupId is null && invoice.ExpirationTime <= DateTimeOffset.UtcNow)
                 throw new ConnectorException("Creation outcome is unknown and the BTCPay invoice expired. Reconcile the Wholly order reference manually; do not create another payment.");
-            var path = "/v1/projects/" + c.ProjectId + (p.InvoiceId is null
-                ? "/stores/" + c.StoreId + "/invoices" : "/invoices/" + p.InvoiceId);
-            var response = await client.Request(c, path, p.InvoiceId is null ? p.RequestJson : null, p.RequestId, ct);
+            var path = "/v1/projects/" + c.ProjectId + (lookupId is null
+                ? "/stores/" + c.StoreId + "/invoices" : "/invoices/" + lookupId);
+            p.LastAttempt = DateTimeOffset.UtcNow;
+            var response = await client.Request(c, path, lookupId is null ? p.RequestJson : null, p.RequestId, ct);
             var remote = response["data"] as JObject ?? throw new ConnectorException("Invalid Wholly invoice response.");
             Protocol.Match(p, c, id, remote);
-            p.InvoiceId = Protocol.Uuid(Protocol.Required(remote, "invoice_id"));
+            var verifiedId = Protocol.Uuid(Protocol.Required(remote, "invoice_id"));
+            if (p.CallbackInvoiceId is not null && p.CallbackInvoiceId != verifiedId)
+                throw new ConnectorException("Callback invoice does not match the API response. Review this payment.");
+            p.InvoiceId = verifiedId;
+            if (lookupId is null) p.CreatedViaApiAt = DateTimeOffset.UtcNow;
+            PaymentSelection.VerifyInvoice(c, remote);
             p.CheckoutUrl = Protocol.Checkout(c, p.InvoiceId, (string?)response["links"]?["checkout"] ?? "");
             p.RemoteStatus = Protocol.Required(remote, "status");
             p.AmountStatus = Protocol.Required(remote, "amount_status");
             p.Sequence = remote["sequence"]!.Value<long>();
             p.LastCheck = DateTimeOffset.UtcNow; p.NextCheck = p.LastCheck.Value.AddSeconds(60); p.Error = null;
+            (p.PaidChain, p.PaidAsset, p.PaidAmount) = ObservedAsset(remote);
             // Reload after network I/O: Bitcoin may have arrived while Wholly was being checked.
             invoice = await invoices.GetInvoice(id);
             await Apply(invoice, p, remote);
+            if (p.CallbackPending) { p.CallbackVerifiedAt = p.LastCheck; p.CallbackPending = false; }
             await Save(id, p);
             return p;
         }
@@ -94,6 +112,20 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
         return null;
     }
 
+    public static (string? Chain, string? Asset, string? Amount) ObservedAsset(JObject remote)
+    {
+        // paid_chain/paid_asset belong to notification payloads, not the invoice
+        // GET contract. Derive display data from API-verified payment intents.
+        if (remote["payment_intents"] is not JArray intents) return (null, null, null);
+        var funded = intents.OfType<JObject>().Where(x => x["received_amount"]?.Type == JTokenType.String
+            && Protocol.Decimal((string)x["received_amount"]!) != "0").ToArray();
+        var winner = (string?)remote["winning_payment_intent_id"];
+        var method = winner is not null ? funded.SingleOrDefault(x => (string?)x["id"] == winner)
+            : funded.Length == 1 ? funded[0] : null;
+        return method is null ? (null, null, null) : (Protocol.Required(method, "chain_slug"),
+            Protocol.Required(method, "symbol"), Protocol.Decimal(Protocol.Required(method, "received_amount")));
+    }
+
     private async Task Apply(InvoiceEntity invoice, PromptDetails p, JObject remote)
     {
         var old = invoice.GetPayments(false).SingleOrDefault(x => x.PaymentMethodId == WhollyPaymentHandler.Method);
@@ -107,8 +139,8 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
         var fullyReceived = p.AmountStatus is "paid" or "overpaid";
         var status = p.Review is not null || !fullyReceived || p.RemoteStatus is not ("processing" or "settled")
             ? PaymentStatus.Unaccounted : p.RemoteStatus == "settled" ? PaymentStatus.Settled : PaymentStatus.Processing;
-        var details = new PaymentDetails { InvoiceId = p.InvoiceId!, Chain = (string?)remote["paid_chain"],
-            Asset = (string?)remote["paid_asset"], AssetAmount = (string?)remote["paid_asset_amount_received"],
+        var details = new PaymentDetails { InvoiceId = p.InvoiceId!, Chain = p.PaidChain,
+            Asset = p.PaidAsset, AssetAmount = p.PaidAmount,
             Resolution = (string?)remote["resolution"] };
         if (old is not null)
         {
@@ -140,11 +172,26 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
             throw new UnauthorizedAccessException();
         var payload = Protocol.Json(raw);
         if (Protocol.Uuid(Protocol.Required(payload, "event_id")) != Protocol.Uuid(eventId)) throw new UnauthorizedAccessException();
-        if (p.InvoiceId is null) throw new ConnectorException("Invoice creation is being recovered. Retry this callback.", 30);
+        // Do not await the remote API in a delivery request. Wholly's delivery
+        // timeout is shorter than an API check, and its creation event may arrive
+        // before the original creation response. Save a durable verification job.
+        await using var lease = await locks.Acquire(id, ct, attempts: 5);
+        invoice = await invoices.GetInvoice(id) ?? throw new ConnectorException("Unknown callback invoice.");
+        p = Details(invoice) ?? throw new ConnectorException("Unknown callback method.");
+        if (p.RequestJson is null) throw new UnauthorizedAccessException();
         // A retried old event may have a lower sequence: use it only as an authenticated
         // notification to fetch current state, never as authority for settlement.
-        var check = new PromptDetails { InvoiceId = p.InvoiceId, Amount = p.Amount, Currency = p.Currency };
+        var check = new PromptDetails { InvoiceId = p.InvoiceId ?? p.CallbackInvoiceId, Amount = p.Amount, Currency = p.Currency };
         Protocol.Match(check, c, id, payload);
-        await Synchronize(id, false, ct);
+        var callbackId = Protocol.Uuid(eventId);
+        if (p.CallbackEvents.Contains(callbackId)) return;
+        p.CallbackInvoiceId = Protocol.Uuid(Protocol.Required(payload, "invoice_id"));
+        p.CallbackPending = true; p.LastCallback = DateTimeOffset.UtcNow;
+        var type = (string?)payload["event_type"];
+        p.LastCallbackType = type is not null && System.Text.RegularExpressions.Regex.IsMatch(type, @"\A[a-z._]{1,64}\z") ? type : "notification";
+        p.CallbackEvents = p.CallbackEvents.TakeLast(15).Append(callbackId).ToList();
+        // Preserve API Retry-After on an outage. A new event is not a bypass.
+        if (p.Error is null || p.NextCheck is null) p.NextCheck = DateTimeOffset.UtcNow;
+        await Save(id, p);
     }
 }

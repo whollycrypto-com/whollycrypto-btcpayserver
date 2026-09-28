@@ -6,14 +6,25 @@
     <section class="card p-3 my-3"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h5 class="mb-0">Wholly Crypto</h5><span class="badge text-bg-secondary">@p.RemoteStatus · @p.AmountStatus</span></div>
         @if (p.InvoiceId is not null) { <p class="my-2"><code>@p.InvoiceId</code></p> }
+        @if (TempData["WhollyMessage"] is string message) { <p class="alert alert-info mt-3">@message</p> }
         @if (p.Error is not null) { <p class="alert alert-warning mt-3">@p.Error</p> }
         @if (p.Review is not null) { <p class="alert alert-danger mt-3"><strong>Review required:</strong> @p.Review</p> }
         <div class="d-flex gap-3 flex-wrap mt-3">
             @if (p.CheckoutUrl is not null) { <a href="@p.CheckoutUrl" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">Wholly checkout ↗</a> }
             <form method="post" asp-controller="WhollyCrypto" asp-action="Refresh" asp-route-storeId="@Model.StoreId" asp-route-invoiceId="@Model.Id" permission="@Policies.CanModifyStoreSettings">
-                <button class="btn btn-secondary" type="submit">Check payment</button>
+                <button class="btn btn-secondary" type="submit" disabled="@(p.RequestJson is null)">Check payment</button>
             </form>
         </div>
-        @if (p.LastCheck is not null) { <small class="text-muted mt-2">Last verified: @p.LastCheck.Value.ToString("u")</small> }
+        <details class="mt-3"><summary>IPN and verification</summary>
+            <div class="mt-2 small">Last verified: @(p.LastCheck?.ToString("u") ?? "Not yet")</div>
+            <div class="small">Last API attempt: @(p.LastAttempt?.ToString("u") ?? "Not recorded")</div>
+            <div class="small">Next eligible check: @(p.NextCheck?.ToString("u") ?? "Not scheduled")</div>
+            <div class="small">Signed IPN received: @(p.LastCallback?.ToString("u") ?? "Not received") @p.LastCallbackType</div>
+            <div class="small">@(p.CallbackPending ? "Queued for API verification; receipt alone is not payment proof." : "No queued callback verification.")</div>
+            @if (p.CallbackVerifiedAt is not null) { <div class="small">IPN verified via API: @p.CallbackVerifiedAt.Value.ToString("u")</div> }
+            <p class="small text-muted mt-2 mb-0">If Wholly shows a delivery timeout, check this server's TCP 443 firewall and proxy. Fix the cause before resending from Wholly's IPN history. Automatic retries and API checks do not require another payment.</p>
+        </details>
+        @if (p.PaidAsset is not null) { <small class="mt-2">Received: @p.PaidAmount @p.PaidAsset · @p.PaidChain</small> }
+        <a asp-controller="WhollyCrypto" asp-action="Payments" asp-route-storeId="@Model.StoreId" class="small mt-2" permission="@Policies.CanModifyStoreSettings">All linked payments</a>
     </section>
 }

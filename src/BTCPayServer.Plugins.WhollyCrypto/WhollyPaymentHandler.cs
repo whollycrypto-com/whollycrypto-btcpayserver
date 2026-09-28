@@ -61,6 +61,9 @@ public sealed class WhollyPaymentHandler(Connections connections, CurrencyNameTa
         {
             p.ConnectionId = ""; p.RequestId = ""; p.RequestJson = null;
             p.Error = null; p.Review = null;
+            p.CallbackInvoiceId = null; p.CallbackEvents = []; p.LastCallbackType = null;
+            p.LastCallback = null; p.CallbackVerifiedAt = null; p.CallbackPending = false;
+            p.LastAttempt = null; p.CreatedViaApiAt = null; p.LastCheck = null; p.NextCheck = null;
         }
     }
 

@@ -15,6 +15,8 @@ over its public merchant API. No processor implementation is bundled.
 | Exact amounts, identity, signature and JSON validation | `Protocol.cs` |
 | Settings, customer POST and IPN routes | `WhollyCryptoController.cs` |
 | Pending-invoice recovery | `WhollyWorker.cs` |
+| Paginated payment list, health observations and durable callback selection | `ActivityRepository.cs` |
+| Exact accepted-method subsets and API fallback protection | `PaymentSelection.cs` |
 | Offline/manual-upload documentation card | `PluginResourcesFilter.cs` |
 | Embedded checkout / return bridge | `Views/WhollyCrypto/Embedded.cshtml`, `Return.cshtml`, `Resources/js/` |
 
@@ -24,7 +26,7 @@ All source files above are under `src/BTCPayServer.Plugins.WhollyCrypto/`.
 
 No extra tables or migrations. Versioned, encrypted connections use BTCPay store
 settings. Invoice prompt details hold connection ID, exact saved request, retry
-key, external invoice ID, polling state and review reason. BTCPay's payment table
+key, external invoice ID, polling state, durable callback flags and review reason. BTCPay's payment table
 holds one `WHOLLY-CRYPTO` payment with ID `wholly:<invoice_id>`.
 
 PostgreSQL advisory locks serialize work per BTCPay invoice, including across
@@ -43,7 +45,15 @@ Store settings require BTCPay's store-settings permission and CSRF protection.
 Customer payment POST also needs CSRF. Public IPN POST instead requires a bounded,
 unambiguous body and a timestamped HMAC over its exact bytes, with a five-minute
 clock window. A valid IPN only triggers a fresh API lookup; it never directly
-settles an invoice. Project, store, invoice ID, order ID, amount, currency and
+settles an invoice. Receipt validates and persists a queue marker under the same
+invoice lock, with a short lock wait; no remote HTTP call is made before the ACK.
+The worker drains persisted markers even for terminal invoices, preserves API
+Retry-After and clears markers only after API verification and accounting finish.
+The last 16 event IDs suppress ordinary duplicate delivery without an unbounded
+event ledger. Older replays can cause another read, never duplicate accounting.
+An early authenticated callback may supply a lookup candidate when creation's
+response was lost; only the matching API response establishes the authoritative link.
+Project, store, invoice ID, order ID, amount, currency and
 sequence are all checked against the saved association.
 
 Outbound HTTP disables redirects and proxies, rejects private/reserved DNS
@@ -72,10 +82,19 @@ always visible because iframe load events cannot detect cross-origin policy bloc
 The plugin resource filter alters only its own installed card view model. It does
 not modify upstream files, rely on DOM rewrites or claim directory membership.
 
+Activity queries use only this connector's prompt data in the pinned BTCPay
+invoice JSONB schema. Operator queries always bind a store ID and search/filter
+parameters, page in SQL and have a ten-second timeout. HTTP routes require store
+settings permission; no customer payload, request JSON or secrets are rendered.
+Health is per immutable connection. Loading either page makes no remote API calls.
+Only explicit read tests refresh the catalogue. Creation rechecks selected assets;
+the returned invoice must contain only selected chain/asset IDs. This prevents
+the merchant API's unmatched-selection fallback from silently broadening checkout.
+
 ## Intentionally limited scope
 
 There is one Wholly connection per BTCPay store, no wallet-key access, no exchange,
-no payout/refund endpoint, no token-specific BTCPay on-chain handler and no changes
+no payout/refund endpoint or refund handoff, no token-specific BTCPay on-chain handler and no changes
 to Bitcoin/Lightning handlers. Customers choose networks/assets in hosted Wholly.
 Fiat precision is capped at eight places and Wholly validates enabled currencies.
 

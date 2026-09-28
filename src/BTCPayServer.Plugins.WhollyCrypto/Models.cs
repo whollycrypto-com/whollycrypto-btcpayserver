@@ -13,6 +13,8 @@ public sealed class Connection
     public string ApiKey { get; set; } = "";
     public string IpnSecret { get; set; } = "";
     public bool EmbedCheckout { get; set; }
+    // Null inherits the store. A non-empty selection is immutable for old invoices.
+    public List<AssetChoice>? AcceptedMethods { get; set; }
 }
 
 public sealed class MethodConfig
@@ -45,6 +47,21 @@ public sealed class PromptDetails
     public DateTimeOffset? NextCheck { get; set; }
     public string? Error { get; set; }
     public string? Review { get; set; }
+    [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
+    public DateTimeOffset? LastAttempt { get; set; }
+    [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
+    public DateTimeOffset? CreatedViaApiAt { get; set; }
+    [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
+    public DateTimeOffset? LastCallback { get; set; }
+    [JsonConverter(typeof(NBitcoin.JsonConverters.DateTimeToUnixTimeConverter))]
+    public DateTimeOffset? CallbackVerifiedAt { get; set; }
+    public bool CallbackPending { get; set; }
+    public string? CallbackInvoiceId { get; set; }
+    public string? LastCallbackType { get; set; }
+    public List<string> CallbackEvents { get; set; } = [];
+    public string? PaidChain { get; set; }
+    public string? PaidAsset { get; set; }
+    public string? PaidAmount { get; set; }
 }
 
 public sealed class PaymentDetails
@@ -74,6 +91,55 @@ public sealed class SettingsModel
     public string? IpnSecret { get; set; }
     public bool HasSavedConnection { get; set; }
     public bool EmbedCheckout { get; set; }
+    public string? Message { get; set; }
+    public bool LimitMethods { get; set; }
+    public List<string> SelectedMethods { get; set; } = [];
+    public ConnectionHealth? Health { get; set; }
+    public ConnectionActivity Activity { get; set; } = new();
+}
+
+public sealed record AssetChoice(string Key, string Chain, string Symbol, string Name, string? Contract, bool Ready, string Readiness)
+{
+    public bool Lightning => Key == "bitcoin:lightning";
+}
+
+public sealed class ConnectionHealth
+{
+    public DateTimeOffset? CheckedAt { get; set; }
+    public string? Error { get; set; }
+    public List<AssetChoice> Assets { get; set; } = [];
+}
+
+public sealed class ConnectionActivity
+{
+    public long? LastWrite { get; set; }
+    public long? LastCheck { get; set; }
+    public long? LastCallback { get; set; }
+    public long? CallbackVerifiedAt { get; set; }
+    public int Pending { get; set; }
+    public int Errors { get; set; }
+    public static string Time(long? value) => value is null ? "Not observed yet" : DateTimeOffset.FromUnixTimeSeconds(value.Value).ToString("u");
+}
+
+public sealed class LinkedPayment
+{
+    public string Id { get; set; } = "";
+    public string? OrderId { get; set; }
+    public string Status { get; set; } = "";
+    public DateTimeOffset Created { get; set; }
+    public string DetailsJson { get; set; } = "{}";
+    public PromptDetails Details => JsonConvert.DeserializeObject<PromptDetails>(DetailsJson)!;
+}
+
+public sealed class PaymentsModel
+{
+    public string StoreId { get; set; } = "";
+    public string Search { get; set; } = "";
+    public string Filter { get; set; } = "all";
+    public int Page { get; set; } = 1;
+    public int Total { get; set; }
+    public int Pages => Math.Max(1, (Total + 19) / 20);
+    public List<LinkedPayment> Rows { get; set; } = [];
     public string? Message { get; set; }
 }
 

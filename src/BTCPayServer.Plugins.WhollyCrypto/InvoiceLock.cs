@@ -11,7 +11,7 @@ namespace BTCPayServer.Plugins.WhollyCrypto;
 // No transaction is held open while contacting the remote merchant.
 public sealed class InvoiceLock(ApplicationDbContextFactory factory)
 {
-    public async Task<IAsyncDisposable> Acquire(string invoiceId, CancellationToken ct)
+    public async Task<IAsyncDisposable> Acquire(string invoiceId, CancellationToken ct, int attempts = 25)
     {
         var context = factory.CreateContext();
         var key = BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(Encoding.UTF8.GetBytes("WhollyCrypto:" + invoiceId)));
@@ -19,7 +19,7 @@ public sealed class InvoiceLock(ApplicationDbContextFactory factory)
         {
             await context.Database.OpenConnectionAsync(ct);
             var conn = context.Database.GetDbConnection();
-            for (var i = 0; i < 25; i++)
+            for (var i = 0; i < attempts; i++)
             {
                 if (await conn.ExecuteScalarAsync<bool>(new CommandDefinition("SELECT pg_try_advisory_lock(@key)", new { key }, cancellationToken: ct)))
                     return new Lease(context, key);

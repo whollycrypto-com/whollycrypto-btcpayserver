@@ -15,7 +15,7 @@ public sealed class Plugin : BaseBTCPayServerPlugin
     {
         get { var v = typeof(Plugin).Assembly.GetName().Version!; return new Version(v.Major, v.Minor, v.Build); }
     }
-    public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation. To connect: select a BTCPay store, then Plugins → Wholly Crypto. Save the connection, test read access and create a test invoice. Preview: validate your payment flow before live use.";
+    public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation. To connect: select a BTCPay store, then Plugins → Wholly Crypto. Setup guide, connection health and linked-payment diagnostics included. Validate your payment flow before live use.";
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         [new() { Identifier = "BTCPayServer", Condition = ">=2.4.4 <2.5.0" }];
 
@@ -23,6 +23,7 @@ public sealed class Plugin : BaseBTCPayServerPlugin
     {
         services.AddSingleton<Connections>();
         services.AddSingleton<InvoiceLock>();
+        services.AddSingleton<ActivityRepository>();
         services.AddSingleton<IWhollyClient, WhollyClient>();
         services.AddSingleton<WhollyPaymentHandler>();
         services.AddSingleton<IPaymentMethodHandler>(p => p.GetRequiredService<WhollyPaymentHandler>());

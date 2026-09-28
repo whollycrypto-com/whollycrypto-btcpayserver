@@ -31,6 +31,10 @@ The suite covers exact decimal validation, SSRF origins/addresses, raw-body HMAC
 tampering/replay, stale/mismatched invoice state, duplicate concurrent callbacks,
 partial/full/late/manual/reorg and competing-method payments, lost-response
 recovery, original-fiat accounting and upstream invoice-status transitions.
+1.0 also tests callback acknowledgement without network I/O, persisted queue
+recovery including expired invoices, bounded event deduplication and API backoff,
+lost creation-response recovery by authenticated GET, catalogue/selection checks,
+API-fallback refusal, per-connection health, store isolation and SQL pagination.
 
 `tests/browser.mjs` exercises the compiled package in a real, disposable BTCPay
 2.4.4 web host: initial account/store, settings save, blank secret fields, small
@@ -45,7 +49,10 @@ For the iframe browser fixture, set `BTCPAY_TEST_INVOICE_FILE` to an out-of-repo
 temporary path when running `tests/browser.mjs`. With the same disposable database,
 run the test executable with `--seed-embedded-browser <ID from that file>` and then
 `node tests/embedded.mjs`. The seed refuses non-test databases or non-synthetic
-orders. It writes only a fake linked checkout to that one fixture invoice.
+orders. It writes a fake linked checkout, a catalogue snapshot and 24 additional
+synthetic invoices in that test store; retry deadlines prevent remote requests.
+Run `node tests/admin.mjs` with the same saved browser state to verify health,
+asset filtering, payments pagination/search and authenticated route boundaries.
 Playwright intercepts the checkout origin; no remote Wholly requests are made.
 Tests cover CSP/origin boundaries, blocked-frame fallback, server-only status,
 same-origin return and 320/390/768/1440px layouts. Real wallet apps and a real
@@ -95,10 +102,17 @@ a deliberately small payment you authorize. Do not run this against customer ord
 9. Change connection settings. Old pending invoices still use the original
    connection. Disable the method: new orders must not start Wholly payments.
 10. Back up and restore database plus data-protection keys. Confirm existing
-    invoices can still be verified. Review refund handling before live use.
+    invoices can still be verified. Refund workflows remain outside this connector.
 11. Upload 0.2.0 over 0.1.0 with pending invoices: original full-page connections
     and saved requests must remain unchanged. Enable iframe for a new connection
     and invoice. Test correct/missing allowed origins, full-page fallback, wallet
     deep links, explicit return, settlement and mobile Safari/Chrome.
+12. Upgrade 0.1/0.2 → 1.0 with pending invoices. Read tests must not falsely mark
+    write/IPN access green. Search by all three IDs, test paging/review/error filters,
+    restrict a new connection to a subset and change Wholly acceptance while a
+    checkout is being created. Never show an unexpectedly broadened checkout.
+13. Block inbound callbacks in staging and verify the precise delivery error.
+    Restore access; valid callbacks should ACK after durable queueing, with slow
+    or unavailable API verification visible separately. Restart while queued.
 
 Automated fixtures do not replace this real deployment checklist or security review.

@@ -47,7 +47,7 @@ public sealed class WhollyClient : IWhollyClient
         using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, new Uri(origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", c.ApiKey);
         request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd("WhollyCrypto-BTCPay/0.2.0");
+        request.Headers.UserAgent.ParseAdd("WhollyCrypto-BTCPay/1.0.0");
         if (body is not null)
         {
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -58,7 +58,18 @@ public sealed class WhollyClient : IWhollyClient
         {
             var delay = response.Headers.RetryAfter?.Delta ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow);
             var wait = (int)Math.Clamp(delay?.TotalSeconds ?? 60, 30, 3600);
-            throw new ConnectorException($"Wholly API returned HTTP {(int)response.StatusCode}. Check API access, credits and store configuration.", wait);
+            var help = (int)response.StatusCode switch
+            {
+                401 => "API authentication failed. Check the saved credential and any proxy login challenge.",
+                403 => "Access denied. Check project scope, read/write permission, IP restrictions and proxy rules.",
+                404 => "Project, store or invoice not found. Verify the API IDs and domain.",
+                429 => "API rate limit reached. Verification will retry after the indicated delay.",
+                400 or 422 => "The invoice request was rejected. Check currency, accepted assets, wallets and rates in Wholly.",
+                409 => "Request conflict. Do not create another invoice; review the saved request in both systems.",
+                >= 300 and < 400 => "An API redirect was refused. Use the final HTTPS API origin without a login redirect.",
+                _ => "The API is unavailable. Verification will retry; do not ask the customer to pay again."
+            };
+            throw new ConnectorException($"Wholly API HTTP {(int)response.StatusCode}: {help}", wait);
         }
         if (response.Content.Headers.ContentLength > Protocol.MaxBody) throw new ConnectorException("API response is too large.");
         await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);

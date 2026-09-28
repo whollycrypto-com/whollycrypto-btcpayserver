@@ -6,6 +6,12 @@ namespace BTCPayServer.Plugins.WhollyCrypto;
 
 public sealed class Connections(StoreRepository stores, IDataProtectionProvider protection)
 {
+    public Task<ConnectionHealth?> Health(string storeId, string id) =>
+        stores.GetSettingAsync<ConnectionHealth>(storeId, "WhollyCrypto.Health." + Protocol.Uuid(id));
+
+    public Task SaveHealth(string storeId, string id, ConnectionHealth health) =>
+        stores.UpdateSetting(storeId, "WhollyCrypto.Health." + Protocol.Uuid(id), health);
+
     public async Task<string> Save(string storeId, Connection connection)
     {
         Protocol.ValidateConnection(connection);

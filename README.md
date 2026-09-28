@@ -4,7 +4,7 @@ Add stablecoins and other supported networks to a BTCPay checkout through your
 own [Wholly Crypto](https://www.whollycrypto.com/) installation. Bitcoin and
 Lightning already configured in BTCPay stay unchanged.
 
-**0.2.0 is a preview for staging tests**, built against BTCPay Server **2.4.4**
+**1.0.0** is built against BTCPay Server **2.4.4**
 (.NET 10). The declared compatibility range is 2.4.4–2.4.x; other versions have
 not been tested. This is an independent connector, not an official BTCPay plugin
 directory listing or an endorsement by BTCPay Server.
@@ -14,7 +14,7 @@ directory listing or an endorsement by BTCPay Server.
 1. Your customer chooses **Stablecoins & crypto · Wholly** on a BTCPay invoice.
 2. The connector creates one linked Wholly invoice and opens your hosted checkout.
 3. Wholly receives and monitors payment using your configured wallets and nodes.
-4. Signed IPN notifications trigger an authenticated API check. BTCPay records
+4. Signed IPN notifications queue an authenticated API check. BTCPay records
    the external payment in the original invoice currency after verification.
 
 The connector never receives recovery phrases or private keys. It does not invent
@@ -28,8 +28,9 @@ Download `BTCPayServer.Plugins.WhollyCrypto.btcpay` and `SHA256SUMS` from
 [Releases](https://github.com/whollycrypto-com/whollycrypto-btcpayserver/releases).
 Verify the checksum before installing. Do not upload GitHub's source ZIP as a plugin.
 
-In a **test BTCPay Server 2.4.4**, open **Manage Plugins → Upload Plugin**, upload
+In **BTCPay Server 2.4.4**, open **Manage Plugins → Upload Plugin**, upload
 the `.btcpay` file and restart BTCPay when prompted. Server-admin access is required.
+Test the complete workflow on a staging store before enabling live orders.
 See [BTCPay's plugin documentation](https://docs.btcpayserver.org/Development/Plugins/).
 
 Updates currently use the same manual upload process. A merchant-software update
@@ -82,9 +83,39 @@ The plugin supplies this per-invoice callback automatically:
 https://btcpay.example.com/plugins/whollycrypto/callback/<BTCPAY_INVOICE_ID>
 ```
 
-Allow POST requests to that route from the Wholly server. Do not put a browser
+Allow TCP 443 and POST requests to that route **from the Wholly server**, including
+in your hosting provider's firewall. A reachable browser does not prove that the
+Wholly server is allowed through. Do not put a browser
 login, CAPTCHA or Basic Auth challenge in front of callbacks. Do not disable
 signature verification. Keep both servers' clocks synchronized.
+
+## Connection health and linked payments
+
+**Connection** separates read access, successful invoice creation, the last signed
+IPN receipt and the last successful API verification. These are observations with
+timestamps, not promises that a future payment will work. A fresh connection has
+no write/IPN evidence until an actual staging invoice goes through it.
+
+**Linked payments** searches BTCPay invoice IDs, merchant order IDs and Wholly
+invoice IDs. Filter pending, settled, needs review or verification errors; results
+are paginated. Each row includes original fiat, received asset when reported,
+callback state and safe errors. **Check payment** verifies against the API. It
+does not resend IPN, clear a review flag, manually mark paid or send funds.
+
+## Choose networks and assets
+
+By default, checkout uses every method accepted by the dedicated Wholly store.
+Enable **Choose specific store-accepted methods**, use **Test read access** to
+refresh the catalogue, search and select your choices, then save. For example,
+offer only Ethereum USDC and USDT through BTCPay. Contracts use exact asset IDs,
+not ambiguous ticker matching. Lightning is a separate method.
+
+The plugin cannot enable assets in Wholly. It rechecks the saved subset before
+creating a new linked invoice and verifies the returned methods before showing
+checkout. If a store-policy change causes the API to fall back to broader defaults,
+checkout is blocked with a diagnostic, not silently broadened. Existing invoices
+and retries keep their original connection and exact request. Changing selection
+only affects new BTCPay invoices. Wallet, pricing and confirmations stay in Wholly.
 
 ## Embedded checkout (optional)
 
@@ -132,7 +163,7 @@ The plugin validates the current API state and deduplicates the payment record.
 Fixed, positive fiat invoices only, with at most eight decimal places. At least
 five minutes and no more than 24 hours must remain when the payment method is
 initialized. Crypto-denominated invoices, top-up invoices, mixed/partial-method
-fulfillment and automatic refunds are not supported in this first version.
+fulfillment and refunds/refund handoff are outside this connector's scope.
 An overpayment settles the original fiat invoice, not additional store credit;
 inspect the actual crypto amounts in Wholly before refunding any excess.
 
@@ -150,7 +181,35 @@ for the order reference `btcpay:<BTCPAY_INVOICE_ID>` and reconcile manually.
 Pending invoices also receive periodic API checks (normally about once a minute;
 backlogs and API rate limits can delay this). This supports missed IPN delivery.
 After final settlement, reorg detection depends on IPN or the invoice's **Check
-payment** button; this preview is not a continuous audit of all historic payments.
+payment** button; this is not a continuous audit of all historic payments.
+
+Valid IPN is verified and saved locally before a success response. A background
+worker then reads authoritative API state; it never accepts a callback's payment
+status as proof. Queued work survives restarts and includes expired/settled invoices.
+API failures keep it queued with backoff. Repeated events cannot create a second
+payment. This avoids holding a delivery open during a slow API call. An early
+signed callback can also recover a lost invoice-creation response through a GET.
+
+**Delivery failed in Wholly?** Open Store → IPN → History → Details:
+
+- **Connection timeout:** Wholly cannot reach BTCPay, or the response is too slow.
+  Check DNS, the HTTPS listener, both firewalls and the reverse proxy first.
+- **401:** compare the store IPN secret (not a webhook secret) and server clocks.
+- **403 / login page:** check proxy, WAF, IP restrictions and authentication rules.
+- **503:** verification could not be queued. Pending deliveries retry; inspect
+  the plugin's linked-payment diagnostics and BTCPay service health.
+
+From your Wholly host, test network reachability without sending an event:
+
+```sh
+curl --connect-timeout 5 --max-time 10 https://btcpay.example.com/plugins/whollycrypto/health
+```
+
+It should return connector JSON; this does **not** test a signing secret. After
+fixing the network/configuration, pending retries continue automatically. For a
+permanently failed delivery, resend from Wholly's IPN history. The plugin's Check
+payment is a separate API lookup, not a delivery retry. Expired with no received
+funds is not a lost payment. Do not ask a customer to pay twice because of an IPN error.
 
 Low Wholly credits may pause IPN. API polling remains subject to the merchant API's
 access and rate-limit policies; it is not a substitute for healthy credits and nodes.
@@ -171,13 +230,13 @@ the destination, amount and original payment.
 ## Before live use
 
 Run the [staging checklist](docs/testing.md) on your actual deployment: checkout,
-signed callbacks, confirmation, API downtime/retry, service restart and refund
+signed callbacks, confirmation, API downtime/retry, service restart and exception
 review. Automated tests use synthetic Wholly responses and disposable PostgreSQL,
 not a live Wholly installation or real funds. A first real staging workflow is
 still required. Never post credentials, wallet backups or customer data in issues.
 
 [Architecture](docs/architecture.md) · [Build and test](docs/testing.md) ·
-[1.0 readiness plan](docs/production-readiness.md) ·
+[Deployment readiness](docs/production-readiness.md) ·
 [Security](SECURITY.md) · [Wholly API docs](https://www.whollycrypto.com/api/)
 
 MIT licensed. BTCPay Server is a separate project under its own license.

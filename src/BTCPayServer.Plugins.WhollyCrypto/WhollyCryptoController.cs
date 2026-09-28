@@ -16,7 +16,7 @@ namespace BTCPayServer.Plugins.WhollyCrypto;
 [AutoValidateAntiforgeryToken]
 [ResponseCache(Location = ResponseCacheLocation.None, NoStore = true)]
 public sealed class WhollyCryptoController(StoreRepository stores, Connections connections, IWhollyClient client,
-    WhollyPaymentHandler handler, InvoiceRepository invoices, WhollyBridge bridge) : Controller
+    WhollyPaymentHandler handler, InvoiceRepository invoices, WhollyBridge bridge, ActivityRepository activity) : Controller
 {
     [HttpGet("~/stores/{storeId}/whollycrypto")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -32,6 +32,13 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             vm.ApiOrigin = c.ApiOrigin; vm.CheckoutOrigin = c.CheckoutOrigin; vm.ProjectId = c.ProjectId;
             vm.WhollyStoreId = c.StoreId; vm.HasSavedConnection = true;
             vm.EmbedCheckout = c.EmbedCheckout;
+            vm.LimitMethods = c.AcceptedMethods is not null;
+            vm.SelectedMethods = c.AcceptedMethods?.Select(x => x.Key).ToList() ?? [];
+            vm.Health = await connections.Health(storeId, config.ConnectionId);
+            vm.Activity = await activity.Health(storeId, config.ConnectionId, HttpContext.RequestAborted);
+            // Preserve saved selections even when the last catalogue could not load.
+            if (vm.Health is null && c.AcceptedMethods is not null)
+                vm.Health = new ConnectionHealth { Assets = c.AcceptedMethods };
             vm.Enabled = store.GetPaymentMethodConfig(WhollyPaymentHandler.Method, true) is not null;
         }
         vm.Message = TempData["WhollyMessage"] as string;
@@ -47,10 +54,16 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
         vm.StoreId = storeId;
         var oldConfig = store.GetPaymentMethodConfig(WhollyPaymentHandler.Method)?.ToObject<MethodConfig>();
         vm.HasSavedConnection = oldConfig is not null;
+        var old = oldConfig is null ? null : await connections.Get(storeId, oldConfig.ConnectionId);
+        if (oldConfig is not null)
+        {
+            vm.Health = await connections.Health(storeId, oldConfig.ConnectionId);
+            vm.Activity = await activity.Health(storeId, oldConfig.ConnectionId, ct);
+            if (vm.Health is null && old?.AcceptedMethods is not null) vm.Health = new ConnectionHealth { Assets = old.AcceptedMethods };
+        }
         try
         {
             if (!ModelState.IsValid) return CleanSettings(vm);
-            var old = oldConfig is null ? null : await connections.Get(storeId, oldConfig.ConnectionId);
             var c = new Connection { ApiOrigin = vm.ApiOrigin, CheckoutOrigin = vm.CheckoutOrigin,
                 ProjectId = vm.ProjectId, StoreId = vm.WhollyStoreId, EmbedCheckout = vm.EmbedCheckout,
                 ApiKey = string.IsNullOrWhiteSpace(vm.ApiKey) ? old?.ApiKey ?? "" : vm.ApiKey.Trim(),
@@ -58,12 +71,32 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             Protocol.ValidateConnection(c);
             if (command == "test")
             {
-                await client.Request(c, $"/v1/projects/{c.ProjectId}/stores/{c.StoreId}/payment-assets", null, null, ct);
-                vm.Message = "Read access to this Wholly store works. This does not test invoice creation or incoming callbacks. Changes have not been saved.";
+                var health = new ConnectionHealth { CheckedAt = DateTimeOffset.UtcNow };
+                try { health.Assets = PaymentSelection.Catalog(await client.Request(c, $"/v1/projects/{c.ProjectId}/stores/{c.StoreId}/payment-assets", null, null, ct)); }
+                catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested) { health.Error = Protocol.SafeError(e); }
+                vm.Health = health;
+                if (oldConfig is not null && SameApi(c, old!)) await connections.SaveHealth(storeId, oldConfig.ConnectionId, health);
+                vm.Message = health.Error is null
+                    ? "Read access works and payment methods were refreshed. Write access and incoming IPN need a real staging invoice. Form changes have not been saved."
+                    : "Connection check failed. Saved settings have not changed.";
                 return CleanSettings(vm);
             }
             if (command != "save") return BadRequest();
+            if (vm.LimitMethods)
+            {
+                if (!vm.Enabled && old?.AcceptedMethods is not null && SameApi(c, old)
+                    && vm.SelectedMethods.Order().SequenceEqual(old.AcceptedMethods.Select(x => x.Key).Order()))
+                    c.AcceptedMethods = old.AcceptedMethods; // Pausing must still work during an API outage.
+                else
+                {
+                    var catalog = PaymentSelection.Catalog(await client.Request(c, $"/v1/projects/{c.ProjectId}/stores/{c.StoreId}/payment-assets", null, null, ct));
+                    c.AcceptedMethods = PaymentSelection.Select(vm.SelectedMethods, catalog);
+                    vm.Health = new ConnectionHealth { CheckedAt = DateTimeOffset.UtcNow, Assets = catalog };
+                }
+            }
             var id = await connections.Save(storeId, c);
+            if (vm.Health is not null && (old is not null && SameApi(c, old) || vm.LimitMethods && vm.Enabled))
+                await connections.SaveHealth(storeId, id, vm.Health);
             store.SetPaymentMethodConfig(handler, new MethodConfig { ConnectionId = id });
             var blob = store.GetStoreBlob(); blob.SetExcluded(WhollyPaymentHandler.Method, !vm.Enabled);
             store.SetStoreBlob(blob);
@@ -77,6 +110,24 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             return CleanSettings(vm);
         }
     }
+
+    private static bool SameApi(Connection a, Connection b) => a.ApiOrigin == b.ApiOrigin && a.ProjectId == b.ProjectId
+        && a.StoreId == b.StoreId && a.ApiKey == b.ApiKey;
+
+    [HttpGet("~/stores/{storeId}/whollycrypto/payments")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public async Task<IActionResult> Payments(string storeId, string? search, string? filter, int page = 1, CancellationToken ct = default)
+    {
+        var store = HttpContext.GetStoreDataOrNull();
+        if (store is null || store.Id != storeId) return NotFound();
+        var model = await activity.List(storeId, search, filter, page, ct);
+        model.Message = TempData["WhollyMessage"] as string;
+        return View("Payments", model);
+    }
+
+    // Connectivity only, not payment or authentication readiness. No state/IDs/secrets.
+    [AllowAnonymous, HttpGet("~/plugins/whollycrypto/health")]
+    public IActionResult Health() => Json(new { service = "Wholly Crypto connector", callback_requires_signature = true });
 
     private IActionResult CleanSettings(SettingsModel vm)
     {
@@ -179,7 +230,7 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             }
             await bridge.Callback(invoiceId, buffer.ToArray(), Request.Headers["Wholly-Signature"].ToString(),
                 Request.Headers["Wholly-Event-Id"].ToString(), ct);
-            return Ok(new { received = true });
+            return Ok(new { received = true, verification_pending = true });
         }
         catch (UnauthorizedAccessException) { return Unauthorized(); }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -191,15 +242,26 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
 
     [HttpPost("~/stores/{storeId}/whollycrypto/invoices/{invoiceId}/refresh")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Refresh(string storeId, string invoiceId, CancellationToken ct)
+    public async Task<IActionResult> Refresh(string storeId, string invoiceId, CancellationToken ct, bool returnToPayments = false, string? search = null, string? filter = null, int page = 1)
     {
         var store = HttpContext.GetStoreDataOrNull();
         var invoice = ValidId(invoiceId) ? await invoices.GetInvoice(invoiceId) : null;
         if (store is null || store.Id != storeId || invoice?.StoreId != storeId) return NotFound();
-        try { await bridge.Synchronize(invoiceId, false, ct); }
+        try
+        {
+            var p = WhollyBridge.Details(invoice);
+            if (p?.RequestJson is null) throw new ConnectorException("No linked Wholly request exists yet. The customer must first continue with Wholly Crypto.");
+            if (p?.Error is not null && p.NextCheck > DateTimeOffset.UtcNow)
+                throw new ConnectorException("The API is in retry backoff. Next attempt: " + p.NextCheck.Value.ToString("u"));
+            if (p?.LastAttempt > DateTimeOffset.UtcNow.AddSeconds(-10))
+                throw new ConnectorException("This invoice was just checked. Wait a few seconds before checking again.");
+            await bridge.Synchronize(invoiceId, false, ct);
+            TempData["WhollyMessage"] = "Payment checked against Wholly. No manual paid status was applied.";
+        }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
         { TempData["WhollyMessage"] = Protocol.SafeError(e); }
-        return RedirectToAction("Invoice", "UIInvoice", new { invoiceId });
+        return returnToPayments ? RedirectToAction(nameof(Payments), new { storeId, search, filter, page })
+            : RedirectToAction("Invoice", "UIInvoice", new { invoiceId });
     }
 
     private string ReturnPath(string id) => Request.PathBase + "/i/" + Uri.EscapeDataString(id);

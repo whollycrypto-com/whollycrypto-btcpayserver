@@ -64,7 +64,7 @@ sealed class Checks
 
     public void Unit()
     {
-        Check(new Plugin().Version.ToString() == "0.2.0", "plugin version excludes assembly revision or source hash");
+        Check(new Plugin().Version.ToString() == "1.0.0", "plugin version excludes assembly revision or source hash");
         Check(!JsonConvert.DeserializeObject<Connection>("{}")!.EmbedCheckout, "old connections retain full-page mode");
         var cards = new InstalledPluginsViewModel { InstalledPlugins = [
             new() { Current = new() { Identifier = new Plugin().Identifier } },
@@ -115,6 +115,33 @@ sealed class Checks
         var p = Prompt(); p.ConnectionId = "secret-reference"; p.RequestJson = "private payload"; p.RequestId = "private retry key"; p.Error = "operator only";
         new WhollyPaymentHandler(null!, null!).StripDetailsForNonOwner(p);
         Check(p.ConnectionId == "" && p.RequestJson is null && p.RequestId == "" && p.Error is null, "public prompt strips private fields");
+        var catalog = PaymentSelection.Catalog(Catalog());
+        Check(catalog.Count == 2 && catalog.Any(a => a.Lightning), "catalog includes accepted onchain and Lightning only");
+        var chosen = PaymentSelection.Select([AssetId], catalog);
+        Check(chosen.Single().Symbol == "USDC", "asset selection resolves store identity");
+        Reject(() => PaymentSelection.Select([], catalog), "empty subset");
+        Reject(() => PaymentSelection.Select([Guid.NewGuid().ToString()], catalog), "unaccepted asset");
+        Reject(() => PaymentSelection.Select(["bitcoin:lightning"], catalog.Select(a => a with { Ready = false }).ToList()), "unready method");
+        var selection = PaymentSelection.Request(catalog);
+        Check(selection.Count == 2 && (string?)selection[0]["asset_ids"]?[0] == AssetId, "exact onchain UUID selection");
+        Check((string?)selection[1]["payment_rail"] == "lightning", "Lightning explicitly separate");
+        var restricted = Connection(); restricted.AcceptedMethods = chosen;
+        var selectedInvoice = Remote(); selectedInvoice["payment_intents"] = Intents();
+        PaymentSelection.VerifyInvoice(restricted, selectedInvoice); Count++;
+        selectedInvoice["payment_intents"]![0]!["asset_id"] = Guid.NewGuid().ToString();
+        Reject(() => PaymentSelection.VerifyInvoice(restricted, selectedInvoice), "API fallback cannot broaden asset selection");
+        Reject(() => PaymentSelection.VerifyInvoice(restricted, Remote()), "missing method evidence");
+        var observation = Remote(); observation["payment_intents"] = Intents();
+        Check(WhollyBridge.ObservedAsset(observation).Asset is null, "empty methods do not imply a received asset");
+        observation["payment_intents"]![0]!["received_amount"] = "1.00000100";
+        Check(WhollyBridge.ObservedAsset(observation) == ("ethereum", "USDC", "1.000001"), "received metadata derives from actual invoice GET contract");
+        ((JArray)observation["payment_intents"]!).Add(new JObject { ["id"] = "second-method", ["received_amount"] = "1", ["symbol"] = "OTHER", ["chain_slug"] = "solana" });
+        Check(WhollyBridge.ObservedAsset(observation).Asset is null, "multiple received assets are not guessed");
+        observation["winning_payment_intent_id"] = AssetId;
+        Check(WhollyBridge.ObservedAsset(observation).Asset == "USDC", "explicit API winning method selects settlement display");
+        p.LastCallback = now; p.CallbackInvoiceId = id; p.CallbackPending = true; p.CallbackEvents.Add(Guid.NewGuid().ToString());
+        new WhollyPaymentHandler(null!, null!).StripDetailsForNonOwner(p);
+        Check(p.LastCallback is null && p.CallbackInvoiceId is null && !p.CallbackPending && p.CallbackEvents.Count == 0, "public prompt strips callback diagnostics");
     }
 
     public async Task Database()
@@ -144,6 +171,7 @@ sealed class Checks
         var fake = new FakeClient();
         var paymentService = new PaymentService(aggregator, factory, handlers, repository);
         var bridge = new WhollyBridge(repository, storeRepository, conn, fake, new InvoiceLock(factory), handler, paymentService, aggregator);
+        var activity = new ActivityRepository(factory);
         using var services = new ServiceCollection().BuildServiceProvider();
         var watcher = new InvoiceWatcher(repository, aggregator, null!,
             new NotificationSender(factory, services.GetRequiredService<IServiceScopeFactory>(), new NotificationManager(factory, cache, [], aggregator)),
@@ -194,6 +222,7 @@ sealed class Checks
         fake.Status = "settled";
         await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => bridge.Synchronize(invoice.Id, false, default)));
         var done = await repository.GetInvoice(invoice.Id);
+        Check(WhollyBridge.Details(done)!.PaidAsset == "USDC" && WhollyBridge.Details(done)!.PaidAmount == "28.73", "paid asset is retained from verified API intents");
         Check(done.GetPayments(false).Count() == 1 && done.GetPayments(false).Single().Status == PaymentStatus.Settled, "parallel callbacks cannot double record");
         Check(done.GetPayments(false).Single().PaymentMethodId == WhollyPaymentHandler.Method, "not a fictitious BTC payment");
         await AwaitStatus(invoice.Id, InvoiceStatus.Settled);
@@ -263,10 +292,16 @@ sealed class Checks
         var now = DateTimeOffset.UtcNow;
         await RejectAsync(() => bridge.Callback(notificationInvoice.Id, body, Sign(body, "wrong-secret", now), (string)payload["event_id"]!, default), "forged IPN");
         fake.Status = "settled"; fake.AmountStatus = "paid";
+        var callsBeforeCallback = fake.Calls;
         await bridge.Callback(notificationInvoice.Id, body, Sign(body, Connection().IpnSecret, now), (string)payload["event_id"]!, default);
+        Check(fake.Calls == callsBeforeCallback, "signed callback acknowledges without a remote HTTP roundtrip");
+        Check((await repository.GetInvoice(notificationInvoice.Id)).GetPayments(false).Count() == 0, "IPN receipt is not payment proof");
+        Check((await activity.PendingCallbacks(default)).Contains(notificationInvoice.Id), "callback job durable and visible to restarted worker");
+        await restarted.Synchronize(notificationInvoice.Id, false, default);
         Check((await repository.GetInvoice(notificationInvoice.Id)).GetPayments(false).Single().Status == PaymentStatus.Settled, "IPN uses latest API state not payload status");
         await bridge.Callback(notificationInvoice.Id, body, Sign(body, Connection().IpnSecret, now), (string)payload["event_id"]!, default);
         Check((await repository.GetInvoice(notificationInvoice.Id)).GetPayments(false).Count() == 1, "replayed signed IPN idempotent");
+        Check(!(await activity.PendingCallbacks(default)).Contains(notificationInvoice.Id), "identical callback does not requeue verified event");
         Check((await repository.GetMonitoredInvoices(handler.PaymentMethodId, true)).Length > 0, "BTCPay monitoring query compatibility");
         await AwaitStatus(notificationInvoice.Id, InvoiceStatus.Settled);
 
@@ -279,7 +314,7 @@ sealed class Checks
         Check(!(await conn.Get(store.Id, oldId)).EmbedCheckout && (await conn.Get(store.Id, connectionId)).EmbedCheckout,
             "embedded preference is versioned; old invoices retain full page");
         var embeddedInvoice = await NewInvoice(); fake.Status = "new"; fake.AmountStatus = "none";
-        var controller = new WhollyCryptoController(storeRepository, conn, fake, handler, repository, bridge) {
+        var controller = new WhollyCryptoController(storeRepository, conn, fake, handler, repository, bridge, activity) {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         var start = await controller.Start(embeddedInvoice.Id, default) as RedirectToActionResult;
         Check(start?.ActionName == "Embedded", "POST starts embedded mode through local PRG redirect");
@@ -291,6 +326,104 @@ sealed class Checks
         Check(await controller.Status(embeddedInvoice.Id) is JsonResult, "browser status endpoint returns local state");
         Check(fake.Calls == calls, "browser status requests cannot trigger remote API load");
         Check(await controller.Status("not-valid") is NotFoundResult, "bad invoice identifiers rejected");
+
+        // Callback arrives before a lost creation response, even after local expiry.
+        var recovery = await NewInvoice(); fake.LoseNext = true;
+        await RejectAsync(() => bridge.Synchronize(recovery.Id, true, default), "creation response lost before IPN");
+        var remoteId = fake.LastCreatedId!;
+        var recoveryPayload = (JObject)fake.Response(recovery.Id, remoteId)["data"]!;
+        recoveryPayload["event_id"] = Guid.NewGuid().ToString(); recoveryPayload["event_type"] = "invoice.expired";
+        var recoveryBody = Encoding.UTF8.GetBytes(recoveryPayload.ToString(Formatting.None));
+        var recoveryCalls = fake.Calls;
+        await bridge.Callback(recovery.Id, recoveryBody, Sign(recoveryBody, Connection().IpnSecret, now), (string)recoveryPayload["event_id"]!, default);
+        Check(fake.Calls == recoveryCalls && WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!.InvoiceId is null,
+            "early IPN only records lookup candidate, not an authoritative invoice");
+        var recoveredQueue = WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!;
+        recoveredQueue.NextCheck = DateTimeOffset.UtcNow.AddSeconds(-1); // Advance only the synthetic retry deadline.
+        await repository.UpdatePaymentDetails(recovery.Id, handler, recoveredQueue);
+        await using (var db = factory.CreateContext())
+        {
+            var data = await db.Invoices.FindAsync(recovery.Id) ?? throw new Exception("Missing synthetic recovery invoice");
+            var entity = data.GetBlob(); entity.ExpirationTime = DateTimeOffset.UtcNow.AddMinutes(-1);
+            data.SetBlob(entity); data.Status = "Expired"; await db.SaveChangesAsync();
+        }
+        Check((await activity.PendingCallbacks(default)).Contains(recovery.Id), "expired invoices remain in durable callback queue");
+        fake.Status = "expired"; fake.AmountStatus = "none";
+        var createsBeforeRecovery = fake.Creates;
+        await restarted.Synchronize(recovery.Id, false, default);
+        Check(fake.Creates == createsBeforeRecovery && WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!.InvoiceId == remoteId,
+            "lost response recovery uses authenticated GET, never recreates expired invoice");
+
+        // Backoff survives duplicate/new notifications and restart.
+        recoveryPayload["event_id"] = Guid.NewGuid().ToString();
+        recoveryBody = Encoding.UTF8.GetBytes(recoveryPayload.ToString(Formatting.None));
+        await bridge.Callback(recovery.Id, recoveryBody, Sign(recoveryBody, Connection().IpnSecret, now), (string)recoveryPayload["event_id"]!, default);
+        fake.RateLimited = true;
+        await RejectAsync(() => restarted.Synchronize(recovery.Id, false, default), "API rate limit while queued");
+        var waiting = WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!;
+        Check(waiting.CallbackPending && waiting.NextCheck > DateTimeOffset.UtcNow.AddMinutes(4), "callback job and Retry-After survive failure");
+        recoveryPayload["event_id"] = Guid.NewGuid().ToString(); recoveryBody = Encoding.UTF8.GetBytes(recoveryPayload.ToString(Formatting.None));
+        await bridge.Callback(recovery.Id, recoveryBody, Sign(recoveryBody, Connection().IpnSecret, now), (string)recoveryPayload["event_id"]!, default);
+        Check(!(await activity.PendingCallbacks(default)).Contains(recovery.Id), "new IPN cannot bypass rate-limit backoff");
+        fake.RateLimited = false;
+        waiting = WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!;
+        waiting.NextCheck = DateTimeOffset.UtcNow.AddSeconds(-1); // Synthetic time advance after backoff.
+        await repository.UpdatePaymentDetails(recovery.Id, handler, waiting);
+        using (var worker = new WhollyWorker(repository, restarted, activity, NullLogger<WhollyWorker>.Instance))
+        {
+            await worker.StartAsync(default);
+            for (var attempt = 0; attempt < 500 && WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!.CallbackPending; attempt++)
+                await Task.Delay(50);
+            await worker.StopAsync(default);
+        }
+        Check(!WhollyBridge.Details(await repository.GetInvoice(recovery.Id))!.CallbackPending, "actual background worker drains expired callback after restart/backoff");
+
+        var health = await activity.Health(store.Id, oldId, default);
+        Check(health.LastWrite is not null && health.LastCheck is not null && health.LastCallback is not null && health.CallbackVerifiedAt is not null,
+            "health separates creation, reads, callback receipt and verification");
+        var list = await activity.List(store.Id, linked.InvoiceId, "all", 1, default);
+        Check(list.Total == 1 && list.Rows.Single().Id == notificationInvoice.Id, "Wholly invoice ID search");
+        Check((await activity.List(store.Id, "synthetic-order", "review", 1, default)).Total >= 3, "order search plus review filter");
+        Check((await activity.List("unrelated-store", linked.InvoiceId, "all", 1, default)).Total == 0, "activity isolates BTCPay stores");
+        Check((await activity.Health("unrelated-store", oldId, default)).LastCheck is null, "health isolates stores");
+        Check((await activity.List(store.Id, "%' OR true --", "all", 1, default)).Total == 0, "search is parameterized literal text");
+        var healthRecord = new ConnectionHealth { CheckedAt = DateTimeOffset.UtcNow, Assets = PaymentSelection.Catalog(Catalog()) };
+        await conn.SaveHealth(store.Id, connectionId, healthRecord);
+        Check((await conn.Health(store.Id, connectionId))!.Assets.Count == 2, "catalogue/read health persists per connection");
+
+        // Immutable restricted selection and merchant fallback protection.
+        var selectionConnection = Connection(); selectionConnection.AcceptedMethods = PaymentSelection.Select([AssetId], PaymentSelection.Catalog(Catalog()));
+        connectionId = await conn.Save(store.Id, selectionConnection);
+        store.SetPaymentMethodConfig(handler, new MethodConfig { ConnectionId = connectionId }); await storeRepository.UpdateStore(store);
+        var selected = await NewInvoice(); fake.Status = "new"; fake.AmountStatus = "none";
+        await bridge.Synchronize(selected.Id, true, default);
+        Check((string?)JObject.Parse(fake.LastBody!)["payment_methods"]?[0]?["asset_ids"]?[0] == AssetId, "creation uses selected store asset UUID");
+        var broadened = await NewInvoice(); fake.BroadenMethods = true;
+        await RejectAsync(() => bridge.Synchronize(broadened.Id, true, default), "store policy race/fallback");
+        var blocked = WhollyBridge.Details(await repository.GetInvoice(broadened.Id))!;
+        Check(blocked.InvoiceId is not null && blocked.CheckoutUrl is null && blocked.Error is not null,
+            "failed method proof retains remote ID but withholds checkout");
+        var countCreated = fake.Creates;
+        await RejectAsync(() => bridge.Synchronize(broadened.Id, true, default), "retry policy mismatch");
+        Check(fake.Creates == countCreated, "rejected broad checkout cannot create duplicate invoices");
+        fake.BroadenMethods = false;
+        Check((await conn.Get(store.Id, oldId)).AcceptedMethods is null, "old connection continues inherited payment selection");
+
+        // Actual paging boundaries, deterministic sort and clamping.
+        for (var n = 0; n < 22; n++)
+        {
+            var pageInvoice = await NewInvoice();
+            var pp = WhollyBridge.Details(pageInvoice)!; pp.RequestJson = "{}";
+            await repository.UpdatePaymentDetails(pageInvoice.Id, handler, pp);
+        }
+        var firstPage = await activity.List(store.Id, "", "all", 1, default);
+        var secondPage = await activity.List(store.Id, "", "all", 2, default);
+        Check(firstPage.Rows.Count == 20 && firstPage.Pages > 1 && secondPage.Rows.Count > 0, "20-row server-side paging");
+        Check(!firstPage.Rows.Select(x => x.Id).Intersect(secondPage.Rows.Select(x => x.Id)).Any(), "pages do not overlap");
+        Check((await activity.List(store.Id, "", "all", int.MaxValue, default)).Page == firstPage.Pages, "excess page safely clamped");
+        controller.HttpContext.SetStoreData(new BTCPayServer.Data.StoreData { Id = "unrelated-store" });
+        Check(await controller.Payments(store.Id, null, null) is NotFoundResult, "list requires matching authorized store context");
+        Check(await controller.Refresh("unrelated-store", notificationInvoice.Id, default) is NotFoundResult, "cannot verify another store's invoice");
         await watcher.StopAsync(default);
         aggregator.Dispose(); cache.Dispose();
     }
@@ -310,20 +443,55 @@ sealed class Checks
         details.InvoiceId = "33333333-3333-4333-8333-333333333333";
         details.CheckoutUrl = "https://pay.example.com/invoice/" + details.InvoiceId;
         details.RemoteStatus = "new";
+        details.RequestJson = "{}"; details.NextCheck = DateTimeOffset.UtcNow.AddDays(1);
         await repository.UpdatePaymentDetails(invoice.Id, new WhollyPaymentHandler(null!, null!), details);
+        // Rich operator UI fixtures; no real connection or remote callback required.
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var storeRepository = new StoreRepository(factory, new JsonSerializerSettings(), aggregator, new SettingsRepository(factory, aggregator, cache));
+        var store = await storeRepository.FindStore(invoice.StoreId) ?? throw new Exception("Missing synthetic store");
+        await storeRepository.UpdateSetting(store.Id, "WhollyCrypto.Health." + details.ConnectionId,
+            new ConnectionHealth { CheckedAt = DateTimeOffset.UtcNow, Assets = PaymentSelection.Catalog(Catalog()) });
+        var handler = new WhollyPaymentHandler(null!, null!);
+        for (var n = 0; n < 24; n++)
+        {
+            var item = repository.CreateNewInvoice(store.Id); item.Price = 25; item.Currency = "EUR"; item.Status = InvoiceStatus.New;
+            item.ServerUrl = "https://btcpay.example.com/"; item.ExpirationTime = DateTimeOffset.UtcNow.AddHours(1);
+            item.MonitoringExpiration = DateTimeOffset.UtcNow.AddDays(1); item.Metadata.OrderId = "synthetic-list-order-" + n;
+            var pd = new PromptDetails { ConnectionId = details.ConnectionId, Amount = 25, Currency = "EUR", RequestJson = "{}",
+                InvoiceId = Guid.NewGuid().ToString(), NextCheck = DateTimeOffset.UtcNow.AddDays(1), RemoteStatus = n % 2 == 0 ? "settled" : "new",
+                PaidAsset = n % 2 == 0 ? "USDC" : null, PaidChain = n % 2 == 0 ? "ethereum" : null, PaidAmount = n % 2 == 0 ? "28.73" : null,
+                Error = n == 2 ? "Wholly API HTTP 429: wait for the retry deadline." : null,
+                Review = n == 3 ? "Synthetic late payment. Verify before fulfillment." : null,
+                LastCallback = DateTimeOffset.UtcNow, LastCallbackType = "invoice.settled", LastCheck = DateTimeOffset.UtcNow,
+                CreatedViaApiAt = DateTimeOffset.UtcNow, CallbackVerifiedAt = DateTimeOffset.UtcNow };
+            prompt.Details = JObject.FromObject(pd); item.SetPaymentPrompt(handler.PaymentMethodId, prompt);
+            await repository.CreateInvoiceAsync(new InvoiceCreationContext(store, store.GetStoreBlob(), item, new InvoiceLogs(), new PaymentMethodHandlerDictionary([handler]), null));
+        }
         aggregator.Dispose();
         Console.WriteLine("Synthetic embedded browser fixture prepared; no remote requests or payments.");
     }
 
+    const string AssetId = "44444444-4444-4444-8444-444444444444";
+    static JArray Intents() => [new JObject { ["id"] = AssetId, ["asset_id"] = AssetId, ["chain_slug"] = "ethereum", ["symbol"] = "USDC", ["payment_rail"] = "onchain", ["received_amount"] = "0" }];
+    static JObject Catalog() => new() {
+        ["data"] = new JArray(new JObject { ["selected"] = true, ["wallet_readiness"] = "ready", ["asset"] = new JObject {
+            ["id"] = AssetId, ["chain_slug"] = "ethereum", ["symbol"] = "USDC", ["name"] = "USDC", ["contract_address"] = "0x0000000000000000000000000000000000000001" } },
+            new JObject { ["selected"] = false, ["asset"] = new JObject { ["symbol"] = "UNACCEPTED" } }),
+        ["lightning"] = new JObject { ["enabled"] = true, ["ready"] = true }
+    };
+
     sealed class FakeClient : IWhollyClient
     {
         public int Calls, Creates; public string? LastBody, LastKey;
-        public bool LoseNext, WrongAmount;
+        public bool LoseNext, WrongAmount, RateLimited, BroadenMethods;
+        public string? LastCreatedId;
         public string Status = "new", AmountStatus = "none", Timing = "on_time", Resolution = "automatic";
         readonly Dictionary<string, (string Id, string Order)> requests = new();
         public Task<JObject> Request(Connection connection, string path, string? body, string? requestId, CancellationToken ct)
         {
             Calls++;
+            if (path.EndsWith("/payment-assets")) return Task.FromResult(Catalog());
+            if (RateLimited) throw new ConnectorException("Wholly API HTTP 429: fixture", 300);
             (string Id, string Order) item;
             if (body is not null)
             {
@@ -332,6 +500,7 @@ sealed class Checks
                 {
                     Creates++; item = (Guid.NewGuid().ToString(), ((string)JObject.Parse(body)["order_id"]!)[7..]); requests[requestId!] = item;
                 }
+                LastCreatedId = item.Id;
             }
             else item = requests.Values.Single(x => path.EndsWith(x.Id));
             if (LoseNext) { LoseNext = false; throw new IOException("synthetic lost response"); }
@@ -342,6 +511,9 @@ sealed class Checks
             var data = Remote(order); data["invoice_id"] = id; data["status"] = Status; data["amount_status"] = AmountStatus;
             data["timing_status"] = Timing; data["resolution"] = Resolution; data["sequence"] = Calls;
             if (WrongAmount) data["amount"] = "2500";
+            data["payment_intents"] = Intents();
+            if (BroadenMethods) data["payment_intents"]![0]!["asset_id"] = "55555555-5555-4555-8555-555555555555";
+            if (Status == "settled") { data["winning_payment_intent_id"] = AssetId; data["payment_intents"]![0]!["received_amount"] = "28.73"; }
             return new JObject { ["data"] = data, ["links"] = new JObject { ["checkout"] = "https://pay.example.com/invoice/" + id } };
         }
     }

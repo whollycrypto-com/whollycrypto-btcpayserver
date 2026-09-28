@@ -5,8 +5,14 @@
     Layout = "_Layout";
     ViewData.SetLayoutModel(new LayoutModel("WhollyCrypto", "Wholly Crypto").SetCategory(WellKnownCategories.Store));
 }
+<link rel="stylesheet" href="~/Resources/css/whollycrypto-admin.css" asp-append-version="true" />
+<script src="~/Resources/js/whollycrypto-admin.js" asp-append-version="true" defer></script>
 <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4"><h2 class="mb-0"><img src="~/Resources/img/whollycrypto-horizontal-color.png" width="240" height="48" alt="Wholly Crypto" class="img-fluid bg-white rounded p-2" /></h2>
     <a href="https://github.com/whollycrypto-com/whollycrypto-btcpayserver#setup" target="_blank" rel="noopener noreferrer">Setup guide ↗</a></div>
+<nav class="nav nav-pills gap-2 mb-4" aria-label="Wholly Crypto">
+    <a class="nav-link active" aria-current="page" asp-action="Settings" asp-route-storeId="@Model.StoreId">Connection</a>
+    <a class="nav-link" asp-action="Payments" asp-route-storeId="@Model.StoreId">Linked payments</a>
+</nav>
 <details class="card p-4 mb-4" open="@(!Model.HasSavedConnection)">
     <summary class="fw-semibold">Connect your Wholly Crypto store</summary>
     <ol class="mt-3 mb-0 ps-3">
@@ -19,6 +25,36 @@
     <p class="small text-muted mt-3 mb-0">Find this page under <strong>Plugins → Wholly Crypto</strong> after selecting a BTCPay store. It also appears under store settings. Restart BTCPay after uploading a plugin update.</p>
 </details>
 @if (Model.Message is not null) { <div class="alert alert-info">@Model.Message</div> }
+@if (Model.HasSavedConnection)
+{
+    <section class="card p-4 mb-4" aria-labelledby="wholly-health-title">
+        <h3 class="h5 mb-3" id="wholly-health-title">Connection health</h3>
+        <div class="row g-3">
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong>API read access</strong>
+                <div>@(Model.Health?.CheckedAt is null ? "Not checked" : Model.Health.Error is null ? "✓ Read access verified" : "⚠ Check failed")</div>
+                @if (Model.Health?.CheckedAt is not null) { <small class="text-muted">@Model.Health.CheckedAt.Value.ToString("u") · @Model.Health.Assets.Count accepted methods</small> }
+            </div></div>
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong>Invoice creation</strong>
+                <div>@(Model.Activity.LastWrite is null ? "Not verified with this connection" : "✓ Successful API creation observed")</div>
+                <small class="text-muted">A read test cannot prove write access.</small>
+            </div></div>
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong>Signed IPN received</strong>
+                <div>@ConnectionActivity.Time(Model.Activity.LastCallback)</div>
+                <small class="text-muted">@(Model.Activity.Pending > 0 ? $"{Model.Activity.Pending} awaiting API verification" : "Valid signatures only; receipts are not proof of payment.")</small>
+            </div></div>
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><strong>Last successful reconciliation</strong>
+                <div>@ConnectionActivity.Time(Model.Activity.LastCheck)</div>
+                <small class="text-muted">@Model.Activity.Errors invoice(s) with a verification error</small>
+            </div></div>
+        </div>
+        @if (Model.Health?.Error is not null) { <p class="alert alert-warning mt-3 mb-0">@Model.Health.Error</p> }
+        <details class="mt-3"><summary>IPN not arriving?</summary>
+            <p class="mt-2 mb-2">Allow your Wholly server to connect to this BTCPay server on <strong>TCP 443</strong> in both the VPS and provider firewalls. A connection timeout happens before signature verification. Do not add login or bot challenges to the callback route.</p>
+            <p class="mb-2">From the Wholly server, check <code class="wholly-wrap">@($"{Context.Request.Scheme}://{Context.Request.Host}{Context.Request.PathBase}/plugins/whollycrypto/health")</code>. It should return JSON. This tests reachability, not the signing secret.</p>
+            <p class="mb-0">In Wholly: <strong>Store → IPN → History → Details</strong> shows the delivery error. Fix the cause, then resend failed deliveries there. Pending retries continue automatically. Use Linked payments → Check payment for a fresh API check; it does not resend IPN or mark anything paid manually.</p>
+        </details>
+    </section>
+}
 <form method="post" asp-action="Settings" asp-route-storeId="@Model.StoreId" class="card p-4">
     <div asp-validation-summary="All" class="text-danger" role="alert"></div>
     <div class="form-check form-switch mb-4">
@@ -35,6 +71,32 @@
             <div class="form-text">Copy from Wholly Store → IPN, not a webhook endpoint.</div></div>
     </div>
     @if (Model.HasSavedConnection) { <p class="text-muted mt-3 mb-0">Leave secret fields empty to keep the saved values.</p> }
+    <fieldset class="border rounded p-3 mt-4">
+        <legend class="float-none w-auto fs-6 fw-semibold px-2">Payment methods</legend>
+        <div class="form-check form-switch mb-3"><input asp-for="LimitMethods" class="form-check-input" /><label asp-for="LimitMethods" class="form-check-label">Choose specific store-accepted methods</label></div>
+        <p class="form-text mb-3">Off uses the Wholly store defaults. On limits new BTCPay invoices to your choices. Refresh with Test read access; asset and wallet configuration stays in Wholly.</p>
+        <div id="wholly-method-picker" hidden="@(!Model.LimitMethods)">
+            <label for="wholly-method-search" class="form-label">Find a chain or asset</label>
+            <input id="wholly-method-search" type="search" class="form-control mb-3" placeholder="Ethereum, USDC, contract…" />
+            <div class="wholly-method-list">
+            @foreach (var asset in Model.Health?.Assets ?? [])
+            {
+                <label class="wholly-method-row" data-method-search="@($"{asset.Chain} {asset.Symbol} {asset.Name} {asset.Contract}")">
+                    <input type="checkbox" class="form-check-input" name="SelectedMethods" value="@asset.Key" checked="@(Model.SelectedMethods.Contains(asset.Key))" />
+                    <span class="wholly-wrap"><strong>@asset.Symbol</strong> · @asset.Chain @(asset.Lightning ? "· Lightning" : "")
+                        <small class="d-block text-muted">@asset.Name @asset.Contract</small>
+                        @if (!asset.Ready) { <small class="text-warning">@asset.Readiness</small> }
+                    </span>
+                </label>
+            }
+            @foreach (var missing in Model.SelectedMethods.Where(k => !(Model.Health?.Assets.Any(a => a.Key == k) ?? false)))
+            {
+                <label class="wholly-method-row"><input type="checkbox" class="form-check-input" name="SelectedMethods" value="@missing" checked /><span class="wholly-wrap">@missing <small class="d-block text-warning">Not in the latest catalogue. Refresh or remove this selection.</small></span></label>
+            }
+            </div>
+            @if (Model.Health?.Assets.Count is not > 0) { <p class="text-muted mb-0">Use Test read access to load the store's methods.</p> }
+        </div>
+    </fieldset>
     <fieldset class="border rounded p-3 mt-4">
         <legend class="float-none w-auto fs-6 fw-semibold px-2">Customer checkout</legend>
         <label asp-for="EmbedCheckout" class="form-label">How to open Wholly checkout</label>

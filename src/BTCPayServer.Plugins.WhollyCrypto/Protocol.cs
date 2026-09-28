@@ -50,6 +50,17 @@ public static partial class Protocol
         foreach (var secret in new[] { c.ApiKey, c.IpnSecret })
             if (secret.Length is < 16 or > 4096 || secret.Any(ch => ch < 33 || ch > 126))
                 throw new ConnectorException("Enter the API credential and the Store IPN signing secret.");
+        if (c.AcceptedMethods is { } selected)
+        {
+            if (selected.Count is < 1 or > 64 || selected.Select(x => x.Key).Distinct().Count() != selected.Count)
+                throw new ConnectorException("Choose between 1 and 64 unique payment methods.");
+            foreach (var a in selected)
+            {
+                if (!Regex.IsMatch(a.Chain, @"\A[a-z0-9-]{1,64}\z")) throw new ConnectorException("Invalid payment network.");
+                if (!a.Lightning) Uuid(a.Key);
+                else if (a.Chain != "bitcoin") throw new ConnectorException("Invalid Lightning selection.");
+            }
+        }
     }
 
     public static bool IsPublic(IPAddress address)

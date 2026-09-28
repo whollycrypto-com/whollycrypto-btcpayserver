@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0 - 2026-09-28
+
+- Connection health separates read access, observed invoice creation, signed IPN
+  receipt and API reconciliation, with timestamps and actionable network guidance.
+- Searchable linked-payments list with 20-row pagination, original fiat, received
+  asset, review/error filters and safe API verification retries.
+- Store-level accepted network/asset selection, exact asset IDs and checkout
+  safeguards against policy changes or the API's unmatched-selection fallback.
+- Valid callbacks are acknowledged after durable local queueing instead of waiting
+  for a remote API request. Verification survives restarts, respects backoff and
+  processes terminal invoices; early IPN can recover a lost creation response.
+- More precise safe HTTP errors, callback/API timestamps and duplicate handling.
+- Keeps embedded/full-page checkout, immutable old connections and original-fiat
+  accounting. No refund handoff or refund execution included.
+
+Built/tested against pinned BTCPay 2.4.4 using synthetic API/payment fixtures and
+disposable PostgreSQL. Complete the documented staging checklist on your own
+deployment; no real-money end-to-end certification or directory listing is claimed.
+
 ## 0.2.0 - 2026-09-28
 
 Preview update for BTCPay Server 2.4.4.

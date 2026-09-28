@@ -1,0 +1,70 @@
+@model PaymentsModel
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Abstractions.Constants
+@{
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel("WhollyCrypto", "Wholly Crypto").SetCategory(WellKnownCategories.Store));
+}
+<link rel="stylesheet" href="~/Resources/css/whollycrypto-admin.css" asp-append-version="true" />
+<h2 class="mb-4">Wholly Crypto</h2>
+<nav class="nav nav-pills gap-2 mb-4" aria-label="Wholly Crypto">
+    <a class="nav-link" asp-action="Settings" asp-route-storeId="@Model.StoreId">Connection</a>
+    <a class="nav-link active" aria-current="page" asp-action="Payments" asp-route-storeId="@Model.StoreId">Linked payments</a>
+</nav>
+@if (Model.Message is not null) { <div class="alert alert-info" role="status">@Model.Message</div> }
+<section class="card p-3 p-md-4">
+    <form method="get" class="row g-3 align-items-end mb-4">
+        <div class="col-md-7"><label for="search" class="form-label">Search order or invoice ID</label><input id="search" name="search" value="@Model.Search" type="search" maxlength="100" class="form-control" placeholder="BTCPay invoice, order or Wholly invoice…" /></div>
+        <div class="col-md-3"><label for="filter" class="form-label">Show</label><select id="filter" asp-for="Filter" name="filter" class="form-select">
+            <option value="all">All linked payments</option><option value="pending">Pending</option><option value="review">Needs review</option><option value="errors">Verification errors</option><option value="settled">Settled in Wholly</option></select></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Search</button></div>
+    </form>
+    <div class="table-responsive position-relative">
+        <table class="table align-middle wholly-payments"><thead><tr><th>Invoice / order</th><th>Amount</th><th>Payment</th><th>Verification</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>
+        @foreach (var row in Model.Rows)
+        {
+            var p = row.Details;
+            <tr>
+                <td><a asp-controller="UIInvoice" asp-action="Invoice" asp-route-invoiceId="@row.Id">@row.Id</a>
+                    @if (!string.IsNullOrEmpty(row.OrderId)) { <small class="d-block wholly-wrap">Order: @row.OrderId</small> }
+                    <small class="d-block text-muted wholly-wrap">@(p.InvoiceId ?? p.CallbackInvoiceId ?? "Creation pending")</small>
+                    <small class="text-muted">@row.Created.ToString("u")</small>
+                </td>
+                <td class="text-nowrap">@Protocol.Format(p.Amount) @p.Currency</td>
+                <td><span class="badge @(p.Review is not null ? "text-bg-danger" : p.RemoteStatus == "settled" ? "text-bg-success" : "text-bg-secondary")">@p.RemoteStatus</span>
+                    <small class="d-block mt-1">BTCPay: @row.Status</small>
+                    @if (p.PaidAsset is not null) { <small class="d-block wholly-wrap">@p.PaidAmount @p.PaidAsset · @p.PaidChain</small> }
+                    else { <small class="d-block text-muted">@p.AmountStatus</small> }
+                </td>
+                <td class="wholly-verification">
+                    @if (p.CallbackPending) { <span class="badge text-bg-info mb-1">IPN queued</span> }
+                    <small class="d-block">Checked: @(p.LastCheck?.ToString("u") ?? "Not yet")</small>
+                    @if (p.Error is not null || p.Review is not null || p.LastCallback is not null)
+                    {
+                        <details class="mt-2"><summary>@(p.Review is not null ? "Needs review" : p.Error is not null ? "Verification error" : "Delivery details")</summary>
+                            @if (p.Error is not null) { <p class="text-warning mt-2 mb-2">@p.Error</p> }
+                            @if (p.Review is not null) { <p class="text-danger mt-2 mb-2">@p.Review</p> }
+                            <small class="d-block">Last API attempt: @(p.LastAttempt?.ToString("u") ?? "Not recorded")</small>
+                            @if (p.NextCheck is not null) { <small class="d-block">Next eligible check: @p.NextCheck.Value.ToString("u")</small> }
+                            <small class="d-block">Signed IPN: @(p.LastCallback?.ToString("u") ?? "Not received") @p.LastCallbackType</small>
+                            <small class="d-block">IPN verified via API: @(p.CallbackVerifiedAt?.ToString("u") ?? "Not yet")</small>
+                        </details>
+                    }
+                </td>
+                <td><form method="post" asp-action="Refresh" asp-route-storeId="@Model.StoreId" asp-route-invoiceId="@row.Id">
+                    <input type="hidden" name="returnToPayments" value="true" /><input type="hidden" name="search" value="@Model.Search" /><input type="hidden" name="filter" value="@Model.Filter" /><input type="hidden" name="page" value="@Model.Page" />
+                    <button type="submit" class="btn btn-sm btn-secondary text-nowrap">Check payment</button></form></td>
+            </tr>
+        }
+        @if (Model.Rows.Count == 0) { <tr><td colspan="5" class="text-muted py-4">No matching linked payments. A link is created only when a customer continues with Wholly.</td></tr> }
+        </tbody></table>
+    </div>
+    <nav class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3" aria-label="Linked payments pages">
+        @if (Model.Page > 1) { <a class="btn btn-secondary" asp-action="Payments" asp-route-storeId="@Model.StoreId" asp-route-search="@Model.Search" asp-route-filter="@Model.Filter" asp-route-page="@(Model.Page - 1)">Previous</a> }
+        else { <span class="btn btn-secondary disabled" aria-disabled="true">Previous</span> }
+        <span>Page @Model.Page of @Model.Pages · @Model.Total total</span>
+        @if (Model.Page < Model.Pages) { <a class="btn btn-secondary" asp-action="Payments" asp-route-storeId="@Model.StoreId" asp-route-search="@Model.Search" asp-route-filter="@Model.Filter" asp-route-page="@(Model.Page + 1)">Next</a> }
+        else { <span class="btn btn-secondary disabled" aria-disabled="true">Next</span> }
+    </nav>
+</section>
+<p class="text-muted mt-3">Checks read the current Wholly API state. They never resend IPN, clear a review warning or mark an invoice paid manually. Fulfill only from BTCPay's settled invoice.</p>

@@ -1,0 +1,9 @@
+.wholly-wrap{overflow-wrap:anywhere}
+.wholly-method-list{max-height:24rem;overflow:auto}
+.wholly-method-row{display:flex;gap:.85rem;align-items:flex-start;padding:.85rem;border:1px solid var(--btcpay-body-border-light,#dee2e6);border-radius:.5rem;margin-bottom:.5rem;cursor:pointer}
+.wholly-method-row:has(input:checked){border-color:var(--btcpay-primary,#51b13e);box-shadow:inset 3px 0 var(--btcpay-primary,#51b13e)}
+.wholly-method-row[hidden]{display:none}
+.wholly-method-row input{flex-shrink:0}
+.wholly-payments td{vertical-align:top;padding-block:1rem}
+.wholly-payments{min-width:820px}
+.wholly-verification{min-width:15rem;max-width:23rem;overflow-wrap:anywhere}
