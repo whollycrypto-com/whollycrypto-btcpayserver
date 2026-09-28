@@ -62,6 +62,8 @@ Only the connector DLL, dependency manifest and license are allowed in the
 PDB, private processor source, runtime config or data is shipped. `tools/audit.py`
 checks the source boundary and package entries. The optional `ci/tests.yml`
 template can be enabled as `.github/workflows/tests.yml` by a repository admin.
+Packaging disables the shared compiler process to avoid retaining Razor compiler
+state between runs on long-lived build hosts; normal dependency caches are reused.
 
 Upstream v2.4.4 references `Microsoft.Build.Tasks.Git` 8.0.0 and restore reports
 [GHSA-23fw-v26w-5fgq](https://github.com/advisories/GHSA-23fw-v26w-5fgq).
