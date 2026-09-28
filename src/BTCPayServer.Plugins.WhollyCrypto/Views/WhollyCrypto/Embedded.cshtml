@@ -1,0 +1,18 @@
+@model EmbeddedPayModel
+@{ Layout = null; }
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" /><title>Pay with Wholly Crypto</title>
+<link rel="stylesheet" href="~/Resources/css/whollycrypto.css" asp-append-version="true" />
+<script src="~/Resources/js/whollycrypto-embed.js" asp-append-version="true" defer></script></head>
+<body class="wholly-page wholly-embedded"><main id="wholly-embedded" data-status-url="@Model.StatusPath" data-return-url="@Model.ReturnPath">
+<header class="wholly-checkout-header"><img class="wholly-logo" src="~/Resources/img/whollycrypto-horizontal-color.png" width="240" height="48" alt="Wholly Crypto" />
+<a href="@Model.ReturnPath">Return to BTCPay</a></header>
+<h1>Complete your payment</h1><p class="wholly-amount">@Model.Amount @Model.Currency</p>
+<div class="wholly-frame-toolbar"><span id="wholly-frame-status" role="status">Loading secure checkout…</span>
+<a href="@Model.CheckoutUrl" target="_blank" rel="noopener noreferrer" class="wholly-full-checkout">Open full checkout ↗</a></div>
+<iframe id="wholly-checkout-frame" title="Secure Wholly Crypto checkout" src="@(Model.CheckoutUrl + "?embed=1")"
+    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+    referrerpolicy="strict-origin-when-cross-origin" allow="clipboard-write"></iframe>
+<p class="wholly-help">Checkout not showing, or opening a wallet app? Use Open full checkout. It is the same invoice: pay once only.</p>
+<noscript><p>Automatic return needs JavaScript. You can open the full checkout and return to BTCPay manually.</p></noscript>
+</main></body></html>

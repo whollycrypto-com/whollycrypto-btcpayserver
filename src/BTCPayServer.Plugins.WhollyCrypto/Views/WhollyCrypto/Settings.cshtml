@@ -5,8 +5,19 @@
     Layout = "_Layout";
     ViewData.SetLayoutModel(new LayoutModel("WhollyCrypto", "Wholly Crypto").SetCategory(WellKnownCategories.Store));
 }
-<div class="d-flex align-items-center justify-content-between mb-4"><h2 class="mb-0">Wholly Crypto</h2>
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4"><h2 class="mb-0"><img src="~/Resources/img/whollycrypto-horizontal-color.png" width="240" height="48" alt="Wholly Crypto" class="img-fluid bg-white rounded p-2" /></h2>
     <a href="https://github.com/whollycrypto-com/whollycrypto-btcpayserver#setup" target="_blank" rel="noopener noreferrer">Setup guide ↗</a></div>
+<details class="card p-4 mb-4" open="@(!Model.HasSavedConnection)">
+    <summary class="fw-semibold">Connect your Wholly Crypto store</summary>
+    <ol class="mt-3 mb-0 ps-3">
+        <li class="mb-2">In Wholly, select a project and store. Configure payment methods, wallets, rates and confirmations.</li>
+        <li class="mb-2">Copy both <strong>API IDs</strong> from <strong>Store → Basic</strong>. Create a project-restricted <strong>read/write API credential</strong>.</li>
+        <li class="mb-2">Enable <strong>Store → IPN</strong> and copy its signing secret here. This is not a webhook secret. The callback URL is supplied automatically.</li>
+        <li class="mb-2">Enter the API and checkout domains below. <strong>Save connection first</strong>, then <strong>Test read access</strong>.</li>
+        <li>Create a new fixed-fiat BTCPay invoice, choose <strong>Stablecoins &amp; crypto · Wholly</strong> and complete a staging payment before live use.</li>
+    </ol>
+    <p class="small text-muted mt-3 mb-0">Find this page under <strong>Plugins → Wholly Crypto</strong> after selecting a BTCPay store. It also appears under store settings. Restart BTCPay after uploading a plugin update.</p>
+</details>
 @if (Model.Message is not null) { <div class="alert alert-info">@Model.Message</div> }
 <form method="post" asp-action="Settings" asp-route-storeId="@Model.StoreId" class="card p-4">
     <div asp-validation-summary="All" class="text-danger" role="alert"></div>
@@ -24,6 +35,17 @@
             <div class="form-text">Copy from Wholly Store → IPN, not a webhook endpoint.</div></div>
     </div>
     @if (Model.HasSavedConnection) { <p class="text-muted mt-3 mb-0">Leave secret fields empty to keep the saved values.</p> }
+    <fieldset class="border rounded p-3 mt-4">
+        <legend class="float-none w-auto fs-6 fw-semibold px-2">Customer checkout</legend>
+        <label asp-for="EmbedCheckout" class="form-label">How to open Wholly checkout</label>
+        <select asp-for="EmbedCheckout" class="form-select">
+            <option value="false">Full page (default)</option>
+            <option value="true">Embedded checkout (iframe)</option>
+        </select>
+        <p class="form-text mt-3 mb-2">For embedded mode, open <strong>Wholly → Store → Advanced</strong>, enable <strong>Allow embedded checkout</strong> and add your public BTCPay HTTPS origin to <strong>Allowed HTTPS origins</strong>. Use only the origin, without a path or wildcard.</p>
+        <p class="small mb-2">This BTCPay origin: <code>@($"{Context.Request.Scheme}://{Context.Request.Host}")</code>. If a proxy reports an internal or HTTP address here, use your real public HTTPS origin and fix its forwarded headers.</p>
+        <p class="small text-muted mb-0">Customers keep an Open full checkout link for wallet apps and blocked frames. The read-access test does not check iframe permissions. New settings apply to new invoices only.</p>
+    </fieldset>
     <div class="d-flex gap-3 flex-wrap mt-4"><button type="submit" name="command" value="save" class="btn btn-primary">Save connection</button>
         <button type="submit" name="command" value="test" class="btn btn-secondary">Test read access</button></div>
 </form>

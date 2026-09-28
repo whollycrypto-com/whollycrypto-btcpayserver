@@ -7,10 +7,14 @@ using BTCPayServer.Services.Stores;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
+using BTCPayServer.Filters;
+using BTCPayServer.Security;
+using BTCPayServer.Client.Models;
 
 namespace BTCPayServer.Plugins.WhollyCrypto;
 
 [AutoValidateAntiforgeryToken]
+[ResponseCache(Location = ResponseCacheLocation.None, NoStore = true)]
 public sealed class WhollyCryptoController(StoreRepository stores, Connections connections, IWhollyClient client,
     WhollyPaymentHandler handler, InvoiceRepository invoices, WhollyBridge bridge) : Controller
 {
@@ -27,6 +31,7 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             var c = await connections.Get(storeId, config.ConnectionId);
             vm.ApiOrigin = c.ApiOrigin; vm.CheckoutOrigin = c.CheckoutOrigin; vm.ProjectId = c.ProjectId;
             vm.WhollyStoreId = c.StoreId; vm.HasSavedConnection = true;
+            vm.EmbedCheckout = c.EmbedCheckout;
             vm.Enabled = store.GetPaymentMethodConfig(WhollyPaymentHandler.Method, true) is not null;
         }
         vm.Message = TempData["WhollyMessage"] as string;
@@ -47,7 +52,7 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             if (!ModelState.IsValid) return CleanSettings(vm);
             var old = oldConfig is null ? null : await connections.Get(storeId, oldConfig.ConnectionId);
             var c = new Connection { ApiOrigin = vm.ApiOrigin, CheckoutOrigin = vm.CheckoutOrigin,
-                ProjectId = vm.ProjectId, StoreId = vm.WhollyStoreId,
+                ProjectId = vm.ProjectId, StoreId = vm.WhollyStoreId, EmbedCheckout = vm.EmbedCheckout,
                 ApiKey = string.IsNullOrWhiteSpace(vm.ApiKey) ? old?.ApiKey ?? "" : vm.ApiKey.Trim(),
                 IpnSecret = string.IsNullOrWhiteSpace(vm.IpnSecret) ? old?.IpnSecret ?? "" : vm.IpnSecret.Trim() };
             Protocol.ValidateConnection(c);
@@ -100,6 +105,9 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             var p = await bridge.Synchronize(invoiceId, true, ct);
             if (p.Review is not null || p.RemoteStatus is "settled" or "cancelled" or "invalid" or "expired")
                 return LocalRedirect(ReturnPath(invoiceId));
+            var invoice = await invoices.GetInvoice(invoiceId);
+            var c = await connections.Get(invoice.StoreId, p.ConnectionId);
+            if (c.EmbedCheckout) return RedirectToAction(nameof(Embedded), new { invoiceId });
             return Redirect(p.CheckoutUrl!);
         }
         catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -108,6 +116,51 @@ public sealed class WhollyCryptoController(StoreRepository stores, Connections c
             return View("Pay", new PayModel(invoiceId, "", "", ReturnPath(invoiceId), true, Protocol.SafeError(e)));
         }
     }
+
+    [AllowAnonymous, HttpGet("~/plugins/whollycrypto/pay/{invoiceId}/embedded")]
+    public async Task<IActionResult> Embedded(string invoiceId, [FromServices] ContentSecurityPolicies policies)
+    {
+        if (!ValidId(invoiceId)) return NotFound();
+        var invoice = await invoices.GetInvoice(invoiceId);
+        if (invoice is null || WhollyBridge.Details(invoice) is not { InvoiceId: not null, CheckoutUrl: not null } p) return NotFound();
+        if (ShouldReturn(invoice, p)) return LocalRedirect(ReturnPath(invoiceId));
+        var c = await connections.Get(invoice.StoreId, p.ConnectionId);
+        var checkout = Protocol.Checkout(c, p.InvoiceId, p.CheckoutUrl);
+        if (!c.EmbedCheckout) return Redirect(checkout);
+        policies.Add(new ConsentSecurityPolicy("default-src", "'self'"));
+        policies.Add(new ConsentSecurityPolicy("frame-src", "'self' " + Protocol.Origin(c.CheckoutOrigin).GetLeftPart(UriPartial.Authority)));
+        policies.Add(new ConsentSecurityPolicy("frame-ancestors", "'none'"));
+        policies.Add(new ConsentSecurityPolicy("object-src", "'none'"));
+        policies.Add(new ConsentSecurityPolicy("base-uri", "'none'"));
+        return View("Embedded", new EmbeddedPayModel(invoiceId, Protocol.Format(p.Amount), p.Currency,
+            checkout, ReturnPath(invoiceId), Url.Action(nameof(Status), new { invoiceId })!));
+    }
+
+    // Read only BTCPay's already-verified state. Browsers cannot initiate extra API
+    // polling, choose a redirect URL, or report a payment through this endpoint.
+    [AllowAnonymous, HttpGet("~/plugins/whollycrypto/pay/{invoiceId}/status")]
+    public async Task<IActionResult> Status(string invoiceId)
+    {
+        if (!ValidId(invoiceId)) return NotFound();
+        var invoice = await invoices.GetInvoice(invoiceId);
+        if (invoice is null || WhollyBridge.Details(invoice) is not { } p) return NotFound();
+        return Json(new { returnToInvoice = ShouldReturn(invoice, p) });
+    }
+
+    [AllowAnonymous, HttpGet("~/plugins/whollycrypto/return/{invoiceId}")]
+    [XFrameOptions(XFrameOptionsAttribute.XFrameOptions.SameOrigin)]
+    public async Task<IActionResult> Return(string invoiceId, [FromServices] ContentSecurityPolicies policies)
+    {
+        if (!ValidId(invoiceId)) return NotFound();
+        var invoice = await invoices.GetInvoice(invoiceId);
+        if (invoice is null || WhollyBridge.Details(invoice) is null) return NotFound();
+        policies.Add(new ConsentSecurityPolicy("frame-ancestors", "'self'"));
+        return View("Return", new PayModel(invoiceId, "", "", ReturnPath(invoiceId), false, null));
+    }
+
+    public static bool ShouldReturn(InvoiceEntity invoice, PromptDetails p) => invoice.Archived
+        || invoice.Status is not (InvoiceStatus.New or InvoiceStatus.Processing)
+        || p.Review is not null || p.RemoteStatus is "settled" or "cancelled" or "invalid" or "expired";
 
     [AllowAnonymous, IgnoreAntiforgeryToken, HttpPost("~/plugins/whollycrypto/callback/{invoiceId}")]
     [RequestSizeLimit(Protocol.MaxBody)]

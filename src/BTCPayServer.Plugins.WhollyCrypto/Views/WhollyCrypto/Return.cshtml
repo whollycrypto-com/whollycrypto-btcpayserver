@@ -1,0 +1,9 @@
+@model PayModel
+@{ Layout = null; }
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" /><title>Return to BTCPay</title>
+<link rel="stylesheet" href="~/Resources/css/whollycrypto.css" asp-append-version="true" />
+<script src="~/Resources/js/whollycrypto-return.js" asp-append-version="true" defer></script></head>
+<body class="wholly-page"><main><h1>Return to your invoice</h1>
+<p>BTCPay verifies your payment separately. Returning does not confirm payment.</p>
+<a id="wholly-return-link" href="@Model.ReturnPath" target="_top">Return to BTCPay</a></main></body></html>

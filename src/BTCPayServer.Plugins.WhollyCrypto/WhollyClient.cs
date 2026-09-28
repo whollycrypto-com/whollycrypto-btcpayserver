@@ -47,7 +47,7 @@ public sealed class WhollyClient : IWhollyClient
         using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, new Uri(origin, path));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", c.ApiKey);
         request.Headers.Accept.ParseAdd("application/json");
-        request.Headers.UserAgent.ParseAdd("WhollyCrypto-BTCPay/0.1.0");
+        request.Headers.UserAgent.ParseAdd("WhollyCrypto-BTCPay/0.2.0");
         if (body is not null)
         {
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");

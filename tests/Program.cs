@@ -24,8 +24,12 @@ using BTCPayServer.HostedServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Npgsql;
+using BTCPayServer.Plugins.PluginManagement.Models;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 
 var tests = new Checks();
+if (args.Length == 2 && args[0] == "--seed-embedded-browser") { await tests.SeedEmbeddedBrowser(args[1]); return; }
 tests.Unit();
 if (args.Contains("--database")) await tests.Database();
 Console.WriteLine($"PASS: {tests.Count} checks; database={(args.Contains("--database") ? "executed" : "not requested")}.");
@@ -60,7 +64,21 @@ sealed class Checks
 
     public void Unit()
     {
-        Check(new Plugin().Version.ToString() == "0.1.0", "plugin version excludes assembly revision or source hash");
+        Check(new Plugin().Version.ToString() == "0.2.0", "plugin version excludes assembly revision or source hash");
+        Check(!JsonConvert.DeserializeObject<Connection>("{}")!.EmbedCheckout, "old connections retain full-page mode");
+        var cards = new InstalledPluginsViewModel { InstalledPlugins = [
+            new() { Current = new() { Identifier = new Plugin().Identifier } },
+            new() { Current = new() { Identifier = "Unrelated.Plugin", Documentation = "https://example.com/other" } }] };
+        PluginResourcesFilter.Decorate(cards);
+        Check(cards.InstalledPlugins[0].Current.Documentation == PluginResourcesFilter.Repository + "#setup", "manual-upload card has docs");
+        Check(cards.InstalledPlugins[1].Current.Documentation == "https://example.com/other", "other plugins unchanged");
+        var browsing = new InvoiceEntity { Status = InvoiceStatus.New };
+        var progress = Prompt(); progress.RemoteStatus = "processing";
+        Check(!WhollyCryptoController.ShouldReturn(browsing, progress), "processing keeps iframe open");
+        progress.RemoteStatus = "settled";
+        Check(WhollyCryptoController.ShouldReturn(browsing, progress), "verified settlement returns to BTCPay");
+        progress.RemoteStatus = "new"; progress.Review = "Review required";
+        Check(WhollyCryptoController.ShouldReturn(browsing, progress), "review exits payment frame");
         Check(Protocol.Decimal("00025.000") == "25", "exact decimal normalization");
         Check(Protocol.Decimal("0.000000000000000001") == "0.000000000000000001", "no floating point");
         foreach (var value in new[] { "-1", "1e3", "NaN", "25,0", "+1", " 2", "1.", ".1", "" }) Reject(() => Protocol.Decimal(value), "bad decimal");
@@ -161,6 +179,7 @@ sealed class Checks
         var begin = await bridge.Synchronize(invoice.Id, true, default);
         Check(begin.InvoiceId is not null && fake.Creates == 1, "create on selection");
         var request = fake.LastBody; var key = fake.LastKey;
+        Check(JObject.Parse(request!)["redirect_automatically"]!.Value<bool>(), "full-page mode preserves automatic return");
         await bridge.Synchronize(invoice.Id, true, default);
         Check(fake.Creates == 1, "second click reuses linked invoice");
         Check((await repository.GetInvoice(invoice.Id)).GetPayments(false).Count() == 0, "no payment on new or redirect");
@@ -250,8 +269,50 @@ sealed class Checks
         Check((await repository.GetInvoice(notificationInvoice.Id)).GetPayments(false).Count() == 1, "replayed signed IPN idempotent");
         Check((await repository.GetMonitoredInvoices(handler.PaymentMethodId, true)).Length > 0, "BTCPay monitoring query compatibility");
         await AwaitStatus(notificationInvoice.Id, InvoiceStatus.Settled);
+
+        // A new connection version changes presentation only for new invoices.
+        var embeddedConnection = Connection(); embeddedConnection.EmbedCheckout = true;
+        var oldId = connectionId;
+        connectionId = await conn.Save(store.Id, embeddedConnection);
+        store.SetPaymentMethodConfig(handler, new MethodConfig { ConnectionId = connectionId });
+        await storeRepository.UpdateStore(store);
+        Check(!(await conn.Get(store.Id, oldId)).EmbedCheckout && (await conn.Get(store.Id, connectionId)).EmbedCheckout,
+            "embedded preference is versioned; old invoices retain full page");
+        var embeddedInvoice = await NewInvoice(); fake.Status = "new"; fake.AmountStatus = "none";
+        var controller = new WhollyCryptoController(storeRepository, conn, fake, handler, repository, bridge) {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var start = await controller.Start(embeddedInvoice.Id, default) as RedirectToActionResult;
+        Check(start?.ActionName == "Embedded", "POST starts embedded mode through local PRG redirect");
+        var embeddedRequest = JObject.Parse(fake.LastBody!);
+        Check(embeddedRequest["redirect_automatically"]!.Value<bool>() == false, "iframe disables in-frame automatic navigation");
+        Check((string?)embeddedRequest["redirect_url"] == "https://btcpay.example.com/plugins/whollycrypto/return/" + embeddedInvoice.Id,
+            "iframe return is controlled by same-origin bridge");
+        var calls = fake.Calls;
+        Check(await controller.Status(embeddedInvoice.Id) is JsonResult, "browser status endpoint returns local state");
+        Check(fake.Calls == calls, "browser status requests cannot trigger remote API load");
+        Check(await controller.Status("not-valid") is NotFoundResult, "bad invoice identifiers rejected");
         await watcher.StopAsync(default);
         aggregator.Dispose(); cache.Dispose();
+    }
+
+    public async Task SeedEmbeddedBrowser(string invoiceId)
+    {
+        var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("WHOLLY_TEST_DATABASE"));
+        if (settings.Database is null || !settings.Database.StartsWith("wholly_btcpay_test_", StringComparison.Ordinal))
+            throw new Exception("Refusing non-test database.");
+        var factory = new ApplicationDbContextFactory(Options.Create(new DatabaseOptions { ConnectionString = settings.ConnectionString }), NullLoggerFactory.Instance);
+        var aggregator = new EventAggregator(new Logs());
+        var repository = new InvoiceRepository(factory, aggregator);
+        var invoice = await repository.GetInvoice(invoiceId);
+        if (invoice?.Metadata.OrderId != "synthetic-browser-order") throw new Exception("Only synthetic browser fixture invoices allowed.");
+        var prompt = invoice.GetPaymentPrompt(WhollyPaymentHandler.Method)!;
+        var details = prompt.Details.ToObject<PromptDetails>()!;
+        details.InvoiceId = "33333333-3333-4333-8333-333333333333";
+        details.CheckoutUrl = "https://pay.example.com/invoice/" + details.InvoiceId;
+        details.RemoteStatus = "new";
+        await repository.UpdatePaymentDetails(invoice.Id, new WhollyPaymentHandler(null!, null!), details);
+        aggregator.Dispose();
+        Console.WriteLine("Synthetic embedded browser fixture prepared; no remote requests or payments.");
     }
 
     sealed class FakeClient : IWhollyClient

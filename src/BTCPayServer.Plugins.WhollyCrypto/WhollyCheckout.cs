@@ -14,6 +14,7 @@ public sealed class WhollyCheckout : ICheckoutModelExtension, IPaymentLinkExtens
         context.Model.CheckoutBodyComponentName = "WhollyCryptoCheckout";
         context.Model.AdditionalData["whollyStartUrl"] = context.UrlHelper.Action("Start", "WhollyCrypto",
             new { invoiceId = context.InvoiceEntity.Id })!;
+        context.Model.AdditionalData["whollyLogoUrl"] = context.UrlHelper.Content("~/Resources/img/whollycrypto-horizontal-color.png");
         context.Model.InvoiceBitcoinUrl = null;
         context.Model.InvoiceBitcoinUrlQR = null;
         context.Model.ShowPayInWalletButton = false;

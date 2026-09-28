@@ -3,6 +3,7 @@ using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Mvc;
 
 namespace BTCPayServer.Plugins.WhollyCrypto;
 
@@ -14,7 +15,7 @@ public sealed class Plugin : BaseBTCPayServerPlugin
     {
         get { var v = typeof(Plugin).Assembly.GetName().Version!; return new Version(v.Major, v.Minor, v.Build); }
     }
-    public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation.";
+    public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation. To connect: select a BTCPay store, then Plugins → Wholly Crypto. Save the connection, test read access and create a test invoice. Preview: validate your payment flow before live use.";
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         [new() { Identifier = "BTCPayServer", Condition = ">=2.4.4 <2.5.0" }];
 
@@ -30,7 +31,9 @@ public sealed class Plugin : BaseBTCPayServerPlugin
         services.AddSingleton(new PrettyNameProvider.UntranslatedPrettyName(WhollyPaymentHandler.Method, "Stablecoins & crypto · Wholly"));
         services.AddSingleton<WhollyBridge>();
         services.AddHostedService<WhollyWorker>();
+        services.Configure<MvcOptions>(options => options.Filters.Add(new PluginResourcesFilter()));
         services.AddUIExtension("store-category-nav", "WhollyNav");
+        services.AddUIExtension("store-integrations-nav", "WhollyIntegrationNav");
         services.AddUIExtension("checkout-end", "WhollyCheckout");
         services.AddUIExtension("store-invoices-payments", "WhollyPaymentDetails");
     }

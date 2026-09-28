@@ -4,7 +4,7 @@ Add stablecoins and other supported networks to a BTCPay checkout through your
 own [Wholly Crypto](https://www.whollycrypto.com/) installation. Bitcoin and
 Lightning already configured in BTCPay stay unchanged.
 
-**0.1.0 is a preview for staging tests**, built against BTCPay Server **2.4.4**
+**0.2.0 is a preview for staging tests**, built against BTCPay Server **2.4.4**
 (.NET 10). The declared compatibility range is 2.4.4–2.4.x; other versions have
 not been tested. This is an independent connector, not an official BTCPay plugin
 directory listing or an endorsement by BTCPay Server.
@@ -48,8 +48,10 @@ In Wholly Crypto:
 - Enable Store → IPN and copy its **IPN signing secret**, not a webhook secret.
 - Copy the Project and Store **API IDs** from Store → Basic → API IDs.
 
-In BTCPay, select your store, open **Wholly Crypto** in its settings navigation,
-and enter:
+In BTCPay, **select a store → Plugins → Wholly Crypto** in the left menu.
+The same page is also available under store settings. Installed Plugins → Wholly
+Crypto → **Details** opens this guide. Installing alone does not connect a store.
+Enter:
 
 | Setting | Example |
 | --- | --- |
@@ -59,9 +61,15 @@ and enter:
 | API credential | The project-restricted read/write credential |
 | Store IPN signing secret | The dedicated store's IPN secret |
 
-Use **Test read access**, then enable and save the connection. The read test does
+Enable **Offer Wholly Crypto at checkout**, **Save connection first**, then use
+**Test read access**. The read test does
 not prove write permissions or IPN delivery: complete the staging checklist below.
 Secret inputs stay blank when editing; leave them blank to keep saved values.
+
+Cannot see the menu? Restart BTCPay after uploading, select a store, and use an
+account with permission to modify its settings. The direct route is
+`/stores/<BTCPAY_STORE_ID>/whollycrypto` on your BTCPay server. This is the BTCPay
+store ID from its URL, not the Wholly Store API ID.
 
 Both servers need public HTTPS. This first version accepts Wholly origins on port
 443 only, with no URL path, proxy credentials, localhost or private-network address.
@@ -77,6 +85,34 @@ https://btcpay.example.com/plugins/whollycrypto/callback/<BTCPAY_INVOICE_ID>
 Allow POST requests to that route from the Wholly server. Do not put a browser
 login, CAPTCHA or Basic Auth challenge in front of callbacks. Do not disable
 signature verification. Keep both servers' clocks synchronized.
+
+## Embedded checkout (optional)
+
+Full-page checkout remains the default and works best with wallet-app links.
+To show Wholly inside an iframe on a BTCPay-hosted payment page:
+
+1. In **Wholly → Project → Stores → your store → Advanced**, enable **Allow
+   embedded checkout**. Add `https://btcpay.example.com` to **Allowed HTTPS origins**,
+   replacing it with your actual BTCPay origin. No path, wildcard or API credential.
+2. In **BTCPay → Plugins → Wholly Crypto → Customer checkout**, choose **Embedded
+   checkout (iframe)** and save.
+3. Create a **new** BTCPay invoice and test it. Existing invoices retain the
+   connection and display mode they were created with.
+
+The customer still chooses Wholly explicitly. The connector then opens its embedded
+payment page with the same hosted invoice. **Open full checkout** stays visible
+for blocked frames, mobile wallet apps and accessibility. It opens the same invoice,
+not another payment request. Do not pay twice.
+
+The Wholly checkout origin must exactly match the configured checkout URL. If a
+proxy adds `X-Frame-Options: DENY` or a conflicting `frame-ancestors` policy, the
+frame will not load; keep the fallback or correct the checkout-specific policy.
+Never remove frame protection globally. A successful read-access test does not
+verify frame permissions, invoice creation, wallet deep links or IPN delivery.
+
+Embedded mode disables Wholly's automatic in-frame redirect. BTCPay's local,
+server-verified state controls the automatic return. Explicit return links only
+navigate back; browser messages never settle invoices or count as payment proof.
 
 ## Payment rules
 
@@ -141,6 +177,7 @@ not a live Wholly installation or real funds. A first real staging workflow is
 still required. Never post credentials, wallet backups or customer data in issues.
 
 [Architecture](docs/architecture.md) · [Build and test](docs/testing.md) ·
+[1.0 readiness plan](docs/production-readiness.md) ·
 [Security](SECURITY.md) · [Wholly API docs](https://www.whollycrypto.com/api/)
 
 MIT licensed. BTCPay Server is a separate project under its own license.

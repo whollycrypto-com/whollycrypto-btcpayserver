@@ -40,14 +40,14 @@ public sealed class WhollyBridge(InvoiceRepository invoices, StoreRepository sto
                 if (store?.GetPaymentMethodConfig(WhollyPaymentHandler.Method, true) is null)
                     throw new ConnectorException("The merchant has disabled new Wholly payments.");
                 var baseUrl = new Uri(invoice.ServerUrl, UriKind.Absolute);
-                var returnUrl = new Uri(baseUrl, "i/" + Uri.EscapeDataString(id)).AbsoluteUri;
+                var returnUrl = new Uri(baseUrl, (c.EmbedCheckout ? "plugins/whollycrypto/return/" : "i/") + Uri.EscapeDataString(id)).AbsoluteUri;
                 p.RequestJson = new JObject
                 {
                     ["amount"] = Protocol.Format(p.Amount), ["currency"] = p.Currency, ["order_id"] = "btcpay:" + id,
                     ["description"] = "Payment for BTCPay invoice " + id,
                     ["expires_in_seconds"] = Math.Clamp((int)(invoice.ExpirationTime - DateTimeOffset.UtcNow).TotalSeconds, 300, 86400),
                     ["ipn_url"] = new Uri(baseUrl, "plugins/whollycrypto/callback/" + Uri.EscapeDataString(id)).AbsoluteUri,
-                    ["redirect_url"] = returnUrl, ["cancel_url"] = returnUrl, ["redirect_automatically"] = true,
+                    ["redirect_url"] = returnUrl, ["cancel_url"] = returnUrl, ["redirect_automatically"] = !c.EmbedCheckout,
                     ["metadata"] = new JObject { ["btcpay_invoice_id"] = id, ["btcpay_store_id"] = invoice.StoreId,
                         ["order_id"] = invoice.Metadata.OrderId }
                 }.ToString(Formatting.None);

@@ -1,6 +1,7 @@
 @model CheckoutModel
 <template id="WhollyCryptoCheckout">
     <div class="payment-box py-3">
+        <img :src="model.whollyLogoUrl" alt="Wholly Crypto" width="230" height="46" class="img-fluid mb-4 bg-white rounded p-2" />
         <h5>Stablecoins &amp; other crypto</h5>
         <p class="text-muted">Choose a network and asset on the merchant's Wholly Crypto checkout.</p>
         <form method="post" :action="model.whollyStartUrl" v-on:submit="opening = true">
@@ -15,6 +16,11 @@
 <script>
 Vue.component('WhollyCryptoCheckout', {
     props: ['model'], template: '#WhollyCryptoCheckout',
-    data: function () { return { opening: false }; }
+    data: function () { return { opening: false }; },
+    mounted: function () {
+        this.resetOpening = () => { this.opening = false; };
+        window.addEventListener('pageshow', this.resetOpening);
+    },
+    beforeDestroy: function () { window.removeEventListener('pageshow', this.resetOpening); }
 });
 </script>

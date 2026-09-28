@@ -41,6 +41,16 @@ It refuses non-loopback hosts. Optional `BTCPAY_TEST_STATE` and
 `BTCPAY_TEST_SCREENSHOTS` paths must be outside the repository; delete the synthetic
 session state after testing. No outbound Wholly request or real payment is made.
 
+For the iframe browser fixture, set `BTCPAY_TEST_INVOICE_FILE` to an out-of-repo
+temporary path when running `tests/browser.mjs`. With the same disposable database,
+run the test executable with `--seed-embedded-browser <ID from that file>` and then
+`node tests/embedded.mjs`. The seed refuses non-test databases or non-synthetic
+orders. It writes only a fake linked checkout to that one fixture invoice.
+Playwright intercepts the checkout origin; no remote Wholly requests are made.
+Tests cover CSP/origin boundaries, blocked-frame fallback, server-only status,
+same-origin return and 320/390/768/1440px layouts. Real wallet apps and a real
+Wholly allowed-origin policy still need staging verification.
+
 Package using the pinned upstream PluginPacker:
 
 ```sh
@@ -84,5 +94,9 @@ a deliberately small payment you authorize. Do not run this against customer ord
    connection. Disable the method: new orders must not start Wholly payments.
 10. Back up and restore database plus data-protection keys. Confirm existing
     invoices can still be verified. Review refund handling before live use.
+11. Upload 0.2.0 over 0.1.0 with pending invoices: original full-page connections
+    and saved requests must remain unchanged. Enable iframe for a new connection
+    and invoice. Test correct/missing allowed origins, full-page fallback, wallet
+    deep links, explicit return, settlement and mobile Safari/Chrome.
 
 Automated fixtures do not replace this real deployment checklist or security review.

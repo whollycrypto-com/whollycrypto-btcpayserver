@@ -15,6 +15,8 @@ over its public merchant API. No processor implementation is bundled.
 | Exact amounts, identity, signature and JSON validation | `Protocol.cs` |
 | Settings, customer POST and IPN routes | `WhollyCryptoController.cs` |
 | Pending-invoice recovery | `WhollyWorker.cs` |
+| Offline/manual-upload documentation card | `PluginResourcesFilter.cs` |
+| Embedded checkout / return bridge | `Views/WhollyCrypto/Embedded.cshtml`, `Return.cshtml`, `Resources/js/` |
 
 All source files above are under `src/BTCPayServer.Plugins.WhollyCrypto/`.
 
@@ -52,6 +54,23 @@ API keys, callback bodies or raw remote error text.
 
 Non-owner payment-prompt responses strip connection IDs, request bodies and
 operator diagnostics. Neither browser success nor client-supplied status is proof.
+
+Embedded mode is part of the immutable protected connection, defaulting to false
+for pre-existing connections. It changes only display/return URLs, not accounting.
+The customer POST creates/reuses the same invoice, then uses PRG to a BTCPay-hosted
+wrapper. Its CSP permits frames only from the pinned checkout origin and itself;
+the wrapper cannot be framed. Wholly independently enforces the store's allowed
+embed origins. The iframe is sandboxed with the capabilities needed for checkout
+and user-activated wallet links. No wallet/API credentials enter HTML or messages.
+
+The parent checks only local BTCPay state every ten seconds while visible. These
+requests never call the Wholly API or mutate payments. A same-origin return bridge
+may request navigation only when both message source and origin match; arbitrary
+Wholly/browser messages cannot signal success. The explicit full-page fallback is
+always visible because iframe load events cannot detect cross-origin policy blocks.
+
+The plugin resource filter alters only its own installed card view model. It does
+not modify upstream files, rely on DOM rewrites or claim directory membership.
 
 ## Intentionally limited scope
 

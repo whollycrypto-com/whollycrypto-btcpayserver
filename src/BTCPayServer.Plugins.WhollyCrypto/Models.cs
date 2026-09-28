@@ -12,6 +12,7 @@ public sealed class Connection
     public string StoreId { get; set; } = "";
     public string ApiKey { get; set; } = "";
     public string IpnSecret { get; set; } = "";
+    public bool EmbedCheckout { get; set; }
 }
 
 public sealed class MethodConfig
@@ -72,11 +73,15 @@ public sealed class SettingsModel
     [Display(Name = "Store IPN signing secret")]
     public string? IpnSecret { get; set; }
     public bool HasSavedConnection { get; set; }
+    public bool EmbedCheckout { get; set; }
     public string? Message { get; set; }
 }
 
 public sealed record PayModel(string InvoiceId, string Amount, string Currency,
     string ReturnPath, bool CanStart, string? Message);
+
+public sealed record EmbeddedPayModel(string InvoiceId, string Amount, string Currency,
+    string CheckoutUrl, string ReturnPath, string StatusPath);
 
 public sealed class ConnectorException(string message, int retryAfterSeconds = 60) : Exception(message)
 {

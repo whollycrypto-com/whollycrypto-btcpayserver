@@ -1,1 +1,22 @@
-:root{color-scheme:light dark;font-family:system-ui,sans-serif;color:#142b26;background:#f2f6f4}.wholly-page{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}.wholly-page main{max-width:480px;width:100%;background:#fff;border:1px solid #d9e4dd;border-radius:18px;padding:32px;box-sizing:border-box}.wholly-eyebrow{font-size:.8rem;letter-spacing:.12em;font-weight:700;color:#137a54}.wholly-page h1{font-size:1.6rem}.wholly-page p{line-height:1.6}.wholly-amount{font-size:1.6rem;font-weight:700}.wholly-page button{width:100%;padding:14px;margin:12px 0 22px;background:#137a54;color:white;border:0;border-radius:9px;font:inherit;font-weight:650;cursor:pointer}.wholly-page a{color:#14724f;text-underline-offset:3px}.wholly-notice{padding:14px;border:1px solid #e2c86e;background:#fff6d6;border-radius:9px}.wholly-help{font-size:.9rem;color:#51645e;margin-top:26px}@media(prefers-color-scheme:dark){:root{color:#ecf4ef;background:#12221e}.wholly-page main{background:#1a3028;border-color:#375044}.wholly-eyebrow,.wholly-page a{color:#84dab1}.wholly-help{color:#c1d3ca}.wholly-notice{background:#403716;border-color:#88793e}}@media(max-width:420px){.wholly-page{padding:12px}.wholly-page main{padding:22px}}
+:root{color-scheme:light dark;font-family:system-ui,sans-serif;color:#142b26;background:#f2f6f4}
+.wholly-page{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}
+.wholly-page main{max-width:480px;width:100%;background:#fff;border:1px solid #d9e4dd;border-radius:18px;padding:32px;box-sizing:border-box}
+.wholly-logo{display:block;max-width:100%;height:auto;object-fit:contain;box-sizing:content-box;background:white;border-radius:8px;padding:8px}
+.wholly-page h1{font-size:1.6rem}
+.wholly-page p{line-height:1.6}
+.wholly-amount{font-size:1.6rem;font-weight:700}
+.wholly-page button{width:100%;padding:14px;margin:12px 0 22px;background:#137a54;color:white;border:0;border-radius:9px;font:inherit;font-weight:650;cursor:pointer}
+.wholly-page a{color:#14724f;text-underline-offset:3px}
+.wholly-page a:focus-visible{outline:3px solid #26a675;outline-offset:4px}
+.wholly-notice{padding:14px;border:1px solid #e2c86e;background:#fff6d6;border-radius:9px}
+.wholly-help{font-size:.9rem;color:#51645e;margin-top:26px}
+.wholly-embedded{display:block}
+.wholly-embedded main{max-width:1040px;margin:auto}
+.wholly-checkout-header,.wholly-frame-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.wholly-embedded h1{font-size:1.25rem;margin-bottom:4px}
+.wholly-embedded .wholly-amount{margin-top:4px;margin-bottom:24px}
+.wholly-frame-toolbar{font-size:.9rem;margin-bottom:16px}
+.wholly-full-checkout{font-weight:650;white-space:nowrap}
+#wholly-checkout-frame{display:block;width:100%;height:clamp(620px,80vh,980px);border:1px solid #d9e4dd;border-radius:14px;background:white;box-sizing:border-box}
+@media(prefers-color-scheme:dark){:root{color:#ecf4ef;background:#12221e}.wholly-page main{background:#1a3028;border-color:#375044}.wholly-page a{color:#84dab1}.wholly-help{color:#c1d3ca}.wholly-notice{background:#403716;border-color:#88793e}}
+@media(max-width:600px){.wholly-page{padding:12px}.wholly-page main{padding:20px}.wholly-logo{width:200px}.wholly-embedded main{padding:16px}.wholly-checkout-header{align-items:flex-start}.wholly-frame-toolbar{align-items:flex-start;flex-direction:column}}
