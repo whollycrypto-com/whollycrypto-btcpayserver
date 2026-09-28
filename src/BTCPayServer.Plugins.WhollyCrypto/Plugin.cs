@@ -10,6 +10,10 @@ public sealed class Plugin : BaseBTCPayServerPlugin
 {
     public override string Identifier => "BTCPayServer.Plugins.WhollyCrypto";
     public override string Name => "Wholly Crypto";
+    public override Version Version
+    {
+        get { var v = typeof(Plugin).Assembly.GetName().Version!; return new Version(v.Major, v.Minor, v.Build); }
+    }
     public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation.";
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
         [new() { Identifier = "BTCPayServer", Condition = ">=2.4.4 <2.5.0" }];

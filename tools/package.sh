@@ -17,5 +17,5 @@ install -m 0644 "$artifacts/bin/$plugin_name/release/$plugin_name.dll" "$staging
 install -m 0644 "$artifacts/bin/$plugin_name/release/$plugin_name.deps.json" "$staging/"
 install -m 0644 LICENSE "$staging/"
 dotnet "$artifacts/bin/BTCPayServer.PluginPacker/release/BTCPayServer.PluginPacker.dll" "$staging" "$plugin_name" "$PWD/dist"
-python3 tools/audit.py --package "dist/$plugin_name/0.1.0/$plugin_name.btcpay"
+python3 tools/audit.py --package "dist/$plugin_name/0.1.0/$plugin_name.btcpay" --expected-dll "$staging/$plugin_name.dll"
 echo 'Preview package and checksums are in dist/BTCPayServer.Plugins.WhollyCrypto/0.1.0/'

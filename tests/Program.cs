@@ -60,6 +60,7 @@ sealed class Checks
 
     public void Unit()
     {
+        Check(new Plugin().Version.ToString() == "0.1.0", "plugin version excludes assembly revision or source hash");
         Check(Protocol.Decimal("00025.000") == "25", "exact decimal normalization");
         Check(Protocol.Decimal("0.000000000000000001") == "0.000000000000000001", "no floating point");
         foreach (var value in new[] { "-1", "1e3", "NaN", "25,0", "+1", " 2", "1.", ".1", "" }) Reject(() => Protocol.Decimal(value), "bad decimal");

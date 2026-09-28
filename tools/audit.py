@@ -11,6 +11,7 @@ PIN = '2d5a0d8077bb33af080e949031da33d84b80638d'
 NAME = 'BTCPayServer.Plugins.WhollyCrypto'
 parser = argparse.ArgumentParser()
 parser.add_argument('--package', type=Path)
+parser.add_argument('--expected-dll', type=Path)
 args = parser.parse_args()
 
 def safe_content(name, content):
@@ -56,4 +57,6 @@ if args.package:
             if item.file_size > 2_000_000:
                 raise SystemExit('Unexpected package entry size')
             safe_content(item.filename, package.read(item))
+        if args.expected_dll and package.read(NAME + '.dll') != args.expected_dll.read_bytes():
+            raise SystemExit('Package does not contain the freshly built connector')
     print('PASS: package contains only connector DLL, dependency manifest and license')
