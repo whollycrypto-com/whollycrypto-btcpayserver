@@ -2,7 +2,7 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 plugin_name=BTCPayServer.Plugins.WhollyCrypto
-plugin_version=1.0.0
+plugin_version=1.0.1
 upstream=${BTCPAY_SERVER_DIR:-"$PWD/submodules/btcpayserver"}
 artifacts=${WHOLLY_BUILD_ARTIFACTS:-"$PWD/.build"}
 expected=2d5a0d8077bb33af080e949031da33d84b80638d

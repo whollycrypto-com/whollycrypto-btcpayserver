@@ -12,6 +12,9 @@ dotnet tests/bin/Release/net10.0/WhollyCrypto.Tests.dll
 
 The BTCPay submodule is pinned to v2.4.4, commit
 `2d5a0d8077bb33af080e949031da33d84b80638d`. Do not substitute `master` silently.
+The manifest declares the minimum-only condition `>=2.4.4`. This is accepted by
+Plugin Builder; an exclusive upper bound such as `>=2.4.4 <2.5.0` is not. A missing
+maximum is not proof of compatibility with every future BTCPay version.
 
 For integration tests, create a **disposable** PostgreSQL database whose name
 starts with `wholly_btcpay_test_`. The guard refuses other database names.
@@ -71,6 +74,24 @@ checks the source boundary and package entries. The optional `ci/tests.yml`
 template can be enabled as `.github/workflows/tests.yml` by a repository admin.
 Packaging disables the shared compiler process to avoid retaining Razor compiler
 state between runs on long-lived build hosts; normal dependency caches are reused.
+
+### Plugin Builder submission
+
+Use these fields in **Create a new build**:
+
+| Field | Value |
+| --- | --- |
+| Git repository | `https://github.com/whollycrypto-com/whollycrypto-btcpayserver` |
+| Git branch or tag | `v1.0.1` |
+| Directory to the plugin's project | `src/BTCPayServer.Plugins.WhollyCrypto` |
+| Dotnet build configuration | `Release` |
+
+Version 1.0.0 compiled but Plugin Builder rejected its dependency syntax. Create
+a new build from the fixed tag; rebuilding the immutable old tag keeps the error.
+Our package audit checks the generated manifest as well as the archive. Test the
+Builder-produced package separately, then release it and request listing through
+the [official workflow](https://docs.btcpayserver.org/Developers/plugins/publishing/).
+A successful build is not a public listing or runtime certification.
 
 Upstream v2.4.4 references `Microsoft.Build.Tasks.Git` 8.0.0 and restore reports
 [GHSA-23fw-v26w-5fgq](https://github.com/advisories/GHSA-23fw-v26w-5fgq).

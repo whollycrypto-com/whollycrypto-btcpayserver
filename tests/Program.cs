@@ -64,7 +64,10 @@ sealed class Checks
 
     public void Unit()
     {
-        Check(new Plugin().Version.ToString() == "1.0.0", "plugin version excludes assembly revision or source hash");
+        Check(new Plugin().Version.ToString() == "1.0.1", "plugin version excludes assembly revision or source hash");
+        var hostDependencies = new Plugin().Dependencies.Where(d => d.Identifier == "BTCPayServer").ToArray();
+        Check(hostDependencies.Length == 1, "one unambiguous BTCPay dependency");
+        Check(hostDependencies[0].Condition == ">=2.4.4", "builder-compatible minimum version without an upper bound");
         Check(!JsonConvert.DeserializeObject<Connection>("{}")!.EmbedCheckout, "old connections retain full-page mode");
         var cards = new InstalledPluginsViewModel { InstalledPlugins = [
             new() { Current = new() { Identifier = new Plugin().Identifier } },

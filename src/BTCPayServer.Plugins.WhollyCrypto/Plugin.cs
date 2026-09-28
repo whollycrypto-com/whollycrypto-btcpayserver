@@ -17,7 +17,7 @@ public sealed class Plugin : BaseBTCPayServerPlugin
     }
     public override string Description => "Stablecoins and other networks through your own Wholly Crypto installation. To connect: select a BTCPay store, then Plugins → Wholly Crypto. Setup guide, connection health and linked-payment diagnostics included. Validate your payment flow before live use.";
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
-        [new() { Identifier = "BTCPayServer", Condition = ">=2.4.4 <2.5.0" }];
+        [new() { Identifier = "BTCPayServer", Condition = ">=2.4.4" }];
 
     public override void Execute(IServiceCollection services)
     {

@@ -4,9 +4,9 @@ Add stablecoins and other supported networks to a BTCPay checkout through your
 own [Wholly Crypto](https://www.whollycrypto.com/) installation. Bitcoin and
 Lightning already configured in BTCPay stay unchanged.
 
-**1.0.0** is built against BTCPay Server **2.4.4**
-(.NET 10). The declared compatibility range is 2.4.4–2.4.x; other versions have
-not been tested. This is an independent connector, not an official BTCPay plugin
+**1.0.1** requires BTCPay Server **2.4.4 or newer**, with no maximum version
+declared. It is built and tested against **2.4.4** (.NET 10); newer versions still
+need deployment testing. This is an independent connector, not an official BTCPay plugin
 directory listing or an endorsement by BTCPay Server.
 
 ## How it works

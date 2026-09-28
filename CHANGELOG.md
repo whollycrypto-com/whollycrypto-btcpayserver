@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 - 2026-09-28
+
+- Fix Plugin Builder manifest validation with the minimum-only BTCPay Server
+  dependency `>=2.4.4`, without a maximum version.
+- Add compiled-metadata and generated-manifest regression checks, plus exact
+  Plugin Builder submission fields. Build/test pin remains BTCPay 2.4.4.
+- No payment, accounting, callback or checkout behavior changes. Version 1.0.0
+  and its published assets remain unchanged; submit the new `v1.0.1` tag.
+
 ## 1.0.0 - 2026-09-28
 
 - Connection health separates read access, observed invoice creation, signed IPN

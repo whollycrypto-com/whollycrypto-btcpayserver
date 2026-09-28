@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Public-source and compiled-package allowlist; never reads runtime credentials."""
 import argparse
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -49,6 +50,12 @@ if count < 25:
 print(f'PASS: {count} public source files and pinned public upstream submodule')
 
 if args.package:
+    manifest = json.loads(args.package.with_suffix(args.package.suffix + '.json').read_text())
+    dependencies = [d for d in manifest.get('Dependencies', []) if d.get('Identifier') == 'BTCPayServer']
+    if (manifest.get('Identifier') != NAME or manifest.get('SystemPlugin') is not False
+        or len(dependencies) != 1 or dependencies[0].get('Condition') != '>=2.4.4'):
+        raise SystemExit('Manifest must declare exactly one minimum-only BTCPay dependency: >=2.4.4')
+    print('PASS: generated manifest uses the Plugin Builder minimum-only dependency condition')
     with zipfile.ZipFile(args.package) as package:
         expected = {NAME + '.dll', NAME + '.deps.json', 'LICENSE'}
         if len(package.namelist()) != 3 or set(package.namelist()) != expected or package.testzip():
