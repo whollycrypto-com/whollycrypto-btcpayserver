@@ -1,0 +1,35 @@
+@model SettingsModel
+@using BTCPayServer.Abstractions.Models
+@using BTCPayServer.Abstractions.Constants
+@{
+    Layout = "_Layout";
+    ViewData.SetLayoutModel(new LayoutModel("WhollyCrypto", "Wholly Crypto").SetCategory(WellKnownCategories.Store));
+}
+<div class="d-flex align-items-center justify-content-between mb-4"><h2 class="mb-0">Wholly Crypto</h2>
+    <a href="https://github.com/whollycrypto-com/whollycrypto-btcpayserver#setup" target="_blank" rel="noopener noreferrer">Setup guide ↗</a></div>
+@if (Model.Message is not null) { <div class="alert alert-info">@Model.Message</div> }
+<form method="post" asp-action="Settings" asp-route-storeId="@Model.StoreId" class="card p-4">
+    <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+    <div class="form-check form-switch mb-4">
+        <input asp-for="Enabled" class="form-check-input" /><label asp-for="Enabled" class="form-check-label">Offer Wholly Crypto at checkout</label>
+    </div>
+    <div class="row g-4">
+        <div class="col-md-6"><label asp-for="ApiOrigin" class="form-label"></label><input asp-for="ApiOrigin" class="form-control" placeholder="https://api.example.com" autocomplete="off" /></div>
+        <div class="col-md-6"><label asp-for="CheckoutOrigin" class="form-label"></label><input asp-for="CheckoutOrigin" class="form-control" placeholder="https://pay.example.com" autocomplete="off" /></div>
+        <div class="col-md-6"><label asp-for="ProjectId" class="form-label"></label><input asp-for="ProjectId" class="form-control" autocomplete="off" /></div>
+        <div class="col-md-6"><label asp-for="WhollyStoreId" class="form-label"></label><input asp-for="WhollyStoreId" class="form-control" autocomplete="off" /></div>
+        <div class="col-md-6"><label asp-for="ApiKey" class="form-label"></label><input name="ApiKey" id="ApiKey" type="password" class="form-control" autocomplete="new-password" maxlength="4096" />
+            <div class="form-text">Read/write access restricted to the selected Wholly project.</div></div>
+        <div class="col-md-6"><label asp-for="IpnSecret" class="form-label"></label><input name="IpnSecret" id="IpnSecret" type="password" class="form-control" autocomplete="new-password" maxlength="4096" />
+            <div class="form-text">Copy from Wholly Store → IPN, not a webhook endpoint.</div></div>
+    </div>
+    @if (Model.HasSavedConnection) { <p class="text-muted mt-3 mb-0">Leave secret fields empty to keep the saved values.</p> }
+    <div class="d-flex gap-3 flex-wrap mt-4"><button type="submit" name="command" value="save" class="btn btn-primary">Save connection</button>
+        <button type="submit" name="command" value="test" class="btn btn-secondary">Test read access</button></div>
+</form>
+<div class="alert alert-info mt-4">
+    <strong>Your installation, your wallets.</strong> Configure assets, rates, confirmations and appearance in Wholly.
+    Bitcoin and Lightning already handled by BTCPay stay unchanged. Wholly processing fees and credit policies apply to invoices routed through Wholly.
+</div>
+<p class="text-muted">Use a dedicated Wholly store. The plugin supplies its HTTPS IPN callback automatically.
+    Both services must be publicly reachable. Keep the old API credential valid until its invoices are reconciled.</p>

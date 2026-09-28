@@ -1,0 +1,8 @@
+@using BTCPayServer.Client
+@model BTCPayServer.Components.MainNav.MainNavViewModel
+@if (Model.Store is not null)
+{
+    <li class="nav-item nav-item-sub" permission="@Policies.CanModifyStoreSettings">
+        <a layout-menu-item="WhollyCrypto" asp-controller="WhollyCrypto" asp-action="Settings" asp-route-storeId="@Model.Store.Id">Wholly Crypto</a>
+    </li>
+}

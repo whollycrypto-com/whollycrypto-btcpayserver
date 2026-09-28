@@ -1,0 +1,20 @@
+@model CheckoutModel
+<template id="WhollyCryptoCheckout">
+    <div class="payment-box py-3">
+        <h5>Stablecoins &amp; other crypto</h5>
+        <p class="text-muted">Choose a network and asset on the merchant's Wholly Crypto checkout.</p>
+        <form method="post" :action="model.whollyStartUrl" v-on:submit="opening = true">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn btn-primary rounded-pill w-100" :disabled="opening">
+                {{ opening ? 'Opening checkout…' : 'Continue with Wholly Crypto' }}
+            </button>
+        </form>
+        <p class="small text-muted mt-3 mb-0">Pay through one checkout only. Returning here does not confirm payment.</p>
+    </div>
+</template>
+<script>
+Vue.component('WhollyCryptoCheckout', {
+    props: ['model'], template: '#WhollyCryptoCheckout',
+    data: function () { return { opening: false }; }
+});
+</script>

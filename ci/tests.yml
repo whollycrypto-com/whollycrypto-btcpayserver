@@ -1,0 +1,32 @@
+# Optional template: a repository administrator can copy this into .github/workflows/tests.yml.
+name: BTCPay connector
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: wholly_btcpay_test_ci
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture-ci-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d wholly_btcpay_test_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build tests/WhollyCrypto.Tests.csproj -c Release
+      - run: dotnet tests/bin/Release/net10.0/WhollyCrypto.Tests.dll --database
+        env:
+          WHOLLY_TEST_DATABASE: 'Host=localhost;Database=wholly_btcpay_test_ci;Username=fixture;Password=fixture-ci-only'
+      - run: bash tools/package.sh

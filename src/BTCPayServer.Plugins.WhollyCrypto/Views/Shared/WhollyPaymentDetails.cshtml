@@ -1,0 +1,19 @@
+@using BTCPayServer.Client
+@model InvoiceDetailsModel
+@{ var p = WhollyBridge.Details(Model.Entity); }
+@if (p is not null)
+{
+    <section class="card p-3 my-3"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">Wholly Crypto</h5><span class="badge text-bg-secondary">@p.RemoteStatus · @p.AmountStatus</span></div>
+        @if (p.InvoiceId is not null) { <p class="my-2"><code>@p.InvoiceId</code></p> }
+        @if (p.Error is not null) { <p class="alert alert-warning mt-3">@p.Error</p> }
+        @if (p.Review is not null) { <p class="alert alert-danger mt-3"><strong>Review required:</strong> @p.Review</p> }
+        <div class="d-flex gap-3 flex-wrap mt-3">
+            @if (p.CheckoutUrl is not null) { <a href="@p.CheckoutUrl" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">Wholly checkout ↗</a> }
+            <form method="post" asp-controller="WhollyCrypto" asp-action="Refresh" asp-route-storeId="@Model.StoreId" asp-route-invoiceId="@Model.Id" permission="@Policies.CanModifyStoreSettings">
+                <button class="btn btn-secondary" type="submit">Check payment</button>
+            </form>
+        </div>
+        @if (p.LastCheck is not null) { <small class="text-muted mt-2">Last verified: @p.LastCheck.Value.ToString("u")</small> }
+    </section>
+}

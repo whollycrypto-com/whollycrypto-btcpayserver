@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Product>Wholly Crypto for BTCPay Server</Product>
+    <Description>Accept stablecoins and other cryptocurrencies through your own Wholly Crypto installation.</Description>
+    <Version>0.1.0</Version>
+    <DebugType>none</DebugType>
+    <Authors>Wholly Crypto</Authors>
+    <RepositoryUrl>https://github.com/whollycrypto-com/whollycrypto-btcpayserver</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <BTCPayServerDir Condition="'$(BTCPayServerDir)' == ''">$(MSBuildThisFileDirectory)../../submodules/btcpayserver</BTCPayServerDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ProjectReference>
+      <Properties>StaticWebAssetsEnabled=false</Properties>
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="$(BTCPayServerDir)/BTCPayServer/BTCPayServer.csproj" />
+    <EmbeddedResource Include="Resources/**" />
+  </ItemGroup>
+</Project>

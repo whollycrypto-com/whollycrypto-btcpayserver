@@ -1,0 +1,16 @@
+@model PayModel
+@{ Layout = null; }
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" /><title>Pay with Wholly Crypto</title>
+<link rel="stylesheet" href="~/Resources/css/whollycrypto.css" /></head><body class="wholly-page">
+<main><p class="wholly-eyebrow">WHOLLY CRYPTO</p><h1>Continue your payment</h1>
+@if (Model.Amount.Length > 0) { <p class="wholly-amount">@Model.Amount @Model.Currency</p> }
+@if (Model.Message is not null) { <p class="wholly-notice" role="alert">@Model.Message</p> }
+@if (Model.CanStart)
+{
+    <p>Select your network and asset on the merchant's secure checkout.</p>
+    <form method="post" asp-action="Start" asp-route-invoiceId="@Model.InvoiceId"><button type="submit">Continue with Wholly Crypto</button></form>
+}
+<a href="@Model.ReturnPath">Return to BTCPay invoice</a>
+<p class="wholly-help">Already sent a payment? Do not send it again using another payment option. Wait for confirmation or contact the merchant.</p>
+</main></body></html>
